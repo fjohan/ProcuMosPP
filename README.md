@@ -1,5 +1,69 @@
 # Prosoduc Cues and Modeling Strategies in Swedish Prominence Prediction
 
+## Quickstart (Inference First)
+
+If you only want to run inference with the included example files, use this section.
+
+### 1. Install dependencies
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install torch numpy pandas librosa scikit-learn scipy matplotlib transformers tqdm
+```
+
+### 2. Run inference with provided example data
+
+Using word-level timestamps (recommended):
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --wav example_data/seg_006.wav \
+  --csv example_data/seg_006.csv \
+  --out_csv example_data/seg_006_pred.csv \
+  --praat
+```
+
+Another example:
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --wav example_data/seg_023.wav \
+  --csv example_data/seg_023.csv \
+  --out_csv example_data/seg_023_pred.csv
+```
+
+### 3. Output files
+
+- Prediction CSV, e.g. `example_data/seg_006_pred.csv`
+- With `--praat`:
+  - `<prefix>_pred.TextGrid`
+  - `<prefix>_prom.Sound`
+
+### 4. Sliding-window mode (no CSV)
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --wav example_data/seg_006.wav \
+  --interval 0.4 \
+  --overlap 0.1 \
+  --out_csv example_data/seg_006_windows_pred.csv
+```
+
+Tip (Praat workflow):
+
+- Open the original `.wav`, the produced `*_prom.Sound`, and the produced `*_pred.TextGrid` in Praat.
+- Resample `*_prom.Sound` with sampling frequency `16000 Hz` and precision `1`.
+- Combine the original wav and the resampled prominence sound into stereo.
+- View the stereo sound together with the TextGrid.
+- Optionally mute channel 2 while inspecting alignment.
+
+See "6.5 Caveat: Fixed-Interval Inference and Silence" before using this mode on long recordings.
+
 ## 1. Introduction
 This study investigates the prediction of word-level prominence in Swedish news speech. The goal was to predict continuous prominence ratings (scale 0–2) derived from mass crowdsourcing (20+ raters per file). We compared two pre-trained Wav2Vec 2.0 backbones—one generic and one language-specific—across three levels of architectural complexity to determine the optimal configuration for small-data prosody modeling.
 
@@ -160,15 +224,32 @@ Optional:
 - `--interval`, `--overlap`: sliding window settings if no CSV is provided
 - `--praat`: write Praat outputs
 
-Example with word-level CSV:
+Included example files:
+
+- `example_data/seg_006.wav`
+- `example_data/seg_006.csv`
+- `example_data/seg_023.wav`
+- `example_data/seg_023.csv`
+
+Example with word-level CSV (recommended):
 
 ```bash
 python prompred_infer.py \
   --checkpoint models/prom_model_full_seed142857.pt \
-  --wav sample.wav \
-  --csv sample.csv \
-  --out_csv sample_pred.csv \
+  --wav example_data/seg_006.wav \
+  --csv example_data/seg_006.csv \
+  --out_csv example_data/seg_006_pred.csv \
   --praat
+```
+
+Another CSV-based example:
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --wav example_data/seg_023.wav \
+  --csv example_data/seg_023.csv \
+  --out_csv example_data/seg_023_pred.csv
 ```
 
 Example with automatic sliding windows (no CSV):
@@ -176,10 +257,10 @@ Example with automatic sliding windows (no CSV):
 ```bash
 python prompred_infer.py \
   --checkpoint models/prom_model_full_seed142857.pt \
-  --wav sample.wav \
+  --wav example_data/seg_006.wav \
   --interval 0.4 \
   --overlap 0.1 \
-  --out_csv sample_pred.csv
+  --out_csv example_data/seg_006_windows_pred.csv
 ```
 
 Inference CSV accepted formats:
