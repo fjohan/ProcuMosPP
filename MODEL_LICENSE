@@ -1,0 +1,21 @@
+Copyright (c) 2026 Johan Frid
+
+This license applies to the trained model weights and associated checkpoints
+included in this repository (the "Model").
+
+Permission is granted to use, reproduce, and modify the Model for
+research, academic, evaluation, and other non-commercial purposes.
+
+You may redistribute the Model, including modified versions, provided that:
+- Redistribution is for non-commercial purposes only; and
+- This license notice is included.
+
+Commercial use of the Model, including use in or as part of a commercial
+product or service, is not permitted without prior written permission
+from the copyright holder.
+
+No rights are granted beyond those expressly stated above.
+
+THE MODEL IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+
