@@ -60,6 +60,8 @@ python prompred_infer.py \
   --out_csv example_data/seg_006_windows_pred.csv
 ```
 
+See "6.5 Caveat: Fixed-Interval Inference and Silence" before using this mode on long recordings.
+
 Tip (Praat workflow):
 
 - Open the original `.wav`, the produced `*_prom.Sound`, and the produced `*_pred.TextGrid` in Praat.
@@ -67,8 +69,6 @@ Tip (Praat workflow):
 - Combine the original wav and the resampled prominence sound into stereo.
 - View the stereo sound together with the TextGrid.
 - Optionally mute channel 2 while inspecting alignment.
-
-See "6.5 Caveat: Fixed-Interval Inference and Silence" before using this mode on long recordings.
 
 ## 1. Introduction
 This study investigates the prediction of word-level prominence in Swedish news speech. The goal was to predict continuous prominence ratings (scale 0–2) derived from mass crowdsourcing (20+ raters per file). We compared two pre-trained Wav2Vec 2.0 backbones—one generic and one language-specific—across three levels of architectural complexity to determine the optimal configuration for small-data prosody modeling.
