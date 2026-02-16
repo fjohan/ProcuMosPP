@@ -8,6 +8,7 @@ import librosa
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import argparse
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 from sklearn.preprocessing import StandardScaler
@@ -451,8 +452,10 @@ def run_seed_experiment(seed, data_map):
                 t_np = y[0, :curr_len].cpu().numpy()
                 all_preds.extend(p_np)
                 all_targets.extend(t_np)
-                if seed == SEEDS_TO_TEST[0] and idx == 1:
-                    visualize_file_prominence(wavs[0], csvs[0], p_np, f"plots/{test_spk}_viz.png")
+                #if seed == SEEDS_TO_TEST[0] and idx == 1:
+                #    visualize_file_prominence(wavs[0], csvs[0], p_np, f"plots/{test_spk}_viz.png")
+                if seed == SEEDS_TO_TEST[0]:
+                    visualize_file_prominence(wavs[0], csvs[0], p_np, f"plots/{test_spk}_viz_{idx}.png")
 
         corr, _ = pearsonr(all_targets, all_preds)
         mse = np.mean((np.array(all_targets) - np.array(all_preds))**2)
@@ -465,19 +468,111 @@ def run_seed_experiment(seed, data_map):
     print(f"Seed {seed} -> Avg r: {avg_corr:.4f} | Avg MSE: {avg_mse:.4f}")
     return avg_corr, avg_mse
 
+def train_full_model(seed, data_map, save_dir="models"):
+    print(f"\n--- Training FULL model on ALL speakers (seed={seed}) ---")
+    set_seed(seed)
+    os.makedirs(save_dir, exist_ok=True)
+
+    # combine all speakers
+    all_data = []
+    for spk in sorted(data_map.keys()):
+        all_data.extend(data_map[spk])
+
+    # fit scalers on all data
+    train_ds = ProminenceDataset(all_data, training=True)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=pad_collate)
+
+    model = ProminencePredictor(FRAME_DIM, SCALAR_DIM, HIDDEN_DIM).to(DEVICE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    mse_crit = nn.MSELoss(reduction='none')
+
+    model.train()
+    for epoch in range(EPOCHS):
+        for frames, scalars, y, lens, _, _ in train_loader:
+            frames, scalars, y = frames.to(DEVICE), scalars.to(DEVICE), y.to(DEVICE).float()
+            optimizer.zero_grad()
+            preds = model(frames, scalars, lens)
+            mask = (y != -1).float()
+
+            if USE_WEIGHTED_LOSS:
+                weights = 1.0 + (torch.clamp(y, min=0) * 2.0)
+                loss = (((preds - y)**2) * weights * mask).sum() / mask.sum()
+            else:
+                loss = (mse_crit(preds, y) * mask).sum() / mask.sum()
+
+            loss.backward()
+            optimizer.step()
+
+        print(f"Epoch {epoch+1}/{EPOCHS} done")
+
+    # save deployable checkpoint (model + scalers + config)
+    extra_cfg = {
+        "W2V_MODEL_NAME": W2V_MODEL_NAME,
+        "USE_RAW_PITCH": USE_RAW_PITCH,
+        "USE_SCALARS": USE_SCALARS,
+        "USE_PITCH_SHAPE": USE_PITCH_SHAPE,
+        "USE_ATTENTION": USE_ATTENTION,
+        "USE_MAX_POOLING": USE_MAX_POOLING,
+        "USE_WEIGHTED_LOSS": USE_WEIGHTED_LOSS,
+        "MAX_FRAMES_PER_WORD": MAX_FRAMES_PER_WORD,
+        "FRAME_DIM": FRAME_DIM,
+        "SCALAR_DIM": SCALAR_DIM,
+        "HIDDEN_DIM": HIDDEN_DIM,
+        "NUM_LAYERS": NUM_LAYERS,
+        "DROPOUT": DROPOUT,
+        "LEARNING_RATE": LEARNING_RATE,
+        "EPOCHS": EPOCHS,
+        "seed": seed,
+    }
+
+    out_path = os.path.join(save_dir, f"prom_model_full_seed{seed}.pt")
+    save_checkpoint(out_path, model, train_ds.scalar_scaler, train_ds.frame_scaler, extra_cfg)
+
+    return out_path
+
+def save_checkpoint(path, model, scalar_scaler, frame_scaler, extra_cfg: dict):
+    ckpt = {
+        "model_state_dict": model.state_dict(),
+        "scalar_scaler": scalar_scaler,
+        "frame_scaler": frame_scaler,
+        "config": extra_cfg,
+    }
+    torch.save(ckpt, path)
+    print(f"[Saved] {path}")
+
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["loso", "all"], default="loso",
+                        help="loso = leave-one-speaker-out eval, all = train final model on all speakers")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Optional single seed (otherwise uses SEEDS_TO_TEST)")
+    args = parser.parse_args()
+
     data_map = precompute_data(DATA_ROOT)
-    corrs = []
-    mses = []
-    if data_map:
-        for s in SEEDS_TO_TEST:
+
+    if not data_map:
+        raise SystemExit("No data found.")
+
+    seeds = [args.seed] if args.seed is not None else SEEDS_TO_TEST
+
+    if args.mode == "loso":
+        corrs = []
+        mses = []
+        for s in seeds:
             c, m = run_seed_experiment(s, data_map)
             corrs.append(c)
             mses.append(m)
+
         print("\n" + "="*30)
         print(f"FINAL RESULTS ({EPOCHS} Epochs)")
         print(f"Feature Fusion={USE_PITCH_SHAPE}, Enhanced Head & Optimization={USE_WEIGHTED_LOSS}")
         print(f"Correlation: {np.mean(corrs):.4f} (std {np.std(corrs):.4f})")
         print(f"MSE:         {np.mean(mses):.4f} (std {np.std(mses):.4f})")
         print("="*30)
+
+    elif args.mode == "all":
+        # Train one deployable model (or several if multiple seeds)
+        for s in seeds:
+            train_full_model(s, data_map, save_dir="models")
+
 
