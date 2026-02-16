@@ -61,3 +61,161 @@ Adding **Pitch Shapes (PiSh)** had different effects on the two models:
 ## 5. Conclusion
 We have established a robust pipeline for Swedish prominence prediction. The optimal configuration uses a **language-specific transformer (VoxRex)** combined with **Attention/Max pooling** and **Weighted Loss**. While explicit **Pitch Shape** features offer diminishing returns for correlation on the best model, they provide the most stable and accurate amplitude predictions (lowest MSE), making them valuable for high-precision applications.
 
+## 6. Running the Code
+
+This repository contains two runnable scripts:
+
+- `prompred_train.py`: training and LOSO evaluation
+- `prompred_infer.py`: inference on new audio using a saved checkpoint
+
+### 6.1 Environment Setup
+
+This project requires PyTorch and audio/ML dependencies. In an environment without `torch`, both scripts will fail at import time.
+
+Example setup:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install torch numpy pandas librosa scikit-learn scipy matplotlib transformers tqdm
+```
+
+### 6.2 Expected Training Data Layout
+
+`prompred_train.py` expects a `data/` directory in the project root.  
+Inside `data/`, each speaker gets a subfolder. Each `.wav` must have a matching `.csv` with the same basename.
+
+Expected structure:
+
+```text
+data/
+  spk1/
+    file001.wav
+    file001.csv
+    file002.wav
+    file002.csv
+  spk2/
+    ...
+  spk3/
+    ...
+```
+
+Expected training CSV format (no header):
+
+```text
+start,end,word,rating
+0.12,0.41,det,0.35
+0.41,0.88,huset,1.42
+```
+
+Notes:
+
+- `start` and `end` are in seconds.
+- `rating` is the target prominence value (continuous).
+- If `data/` does not exist or contains no valid pairs, training exits with `No data found.`
+
+### 6.3 Train Script (`prompred_train.py`)
+
+Run LOSO evaluation (default mode):
+
+```bash
+python prompred_train.py --mode loso
+```
+
+Run LOSO with a single seed:
+
+```bash
+python prompred_train.py --mode loso --seed 42
+```
+
+Train final model on all speakers and save checkpoint(s) to `models/`:
+
+```bash
+python prompred_train.py --mode all
+```
+
+Single-seed full training:
+
+```bash
+python prompred_train.py --mode all --seed 142857
+```
+
+Outputs:
+
+- feature cache in `cache/` (auto-created)
+- plots in `plots/` (during LOSO)
+- model checkpoint(s) in `models/`, e.g. `models/prom_model_full_seed142857.pt`
+
+### 6.4 Inference Script (`prompred_infer.py`)
+
+Required inputs:
+
+- `--checkpoint`: trained `.pt` checkpoint (for example from `models/`)
+- `--wav`: input wav file
+
+Optional:
+
+- `--csv`: segments/tokens file
+- `--interval`, `--overlap`: sliding window settings if no CSV is provided
+- `--praat`: write Praat outputs
+
+Example with word-level CSV:
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --wav sample.wav \
+  --csv sample.csv \
+  --out_csv sample_pred.csv \
+  --praat
+```
+
+Example with automatic sliding windows (no CSV):
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --wav sample.wav \
+  --interval 0.4 \
+  --overlap 0.1 \
+  --out_csv sample_pred.csv
+```
+
+Inference CSV accepted formats:
+
+- Header: `start,end,word,rating`
+- Header: `start,end,word` (rating optional)
+- Header: `start_time,end_time,word[,rating]`
+- No header with 3 or 4 columns in the same order
+
+Inference outputs:
+
+- prediction CSV (default name: `<wavbase>_pred.csv`)
+- if `--praat` is used:
+  - `<prefix>_pred.TextGrid`
+  - `<prefix>_prom.Sound`
+
+### 6.5 Caveat: Fixed-Interval Inference and Silence
+
+`⚠ NB: Inference on Fixed Intervals and Non-Speech Regions`
+
+When running inference using fixed-length sliding windows (that is, without word timestamps), the model may produce unexpectedly high prominence values during pauses or non-speech regions.
+
+This occurs because:
+
+- The model was trained exclusively on segments containing speech (word-level units).
+- Feature normalization (for example, log duration and RMS energy) can cause silent intervals to resemble low-energy speech rather than true silence.
+- The model has never learned an explicit non-speech class.
+
+As a result, silence, background noise, or filled pauses may receive non-zero or even high prominence predictions when using interval-based inference.
+
+Recommendations:
+
+- Prefer inference with word-level timestamps when available.
+- If using sliding windows, consider:
+  - Adding a simple energy threshold to suppress predictions during silence.
+  - Running a Voice Activity Detection (VAD) step before inference.
+  - Post-processing the prominence curve to zero out low-energy regions.
+
+This limitation does not affect inference when using word-aligned CSV input.
