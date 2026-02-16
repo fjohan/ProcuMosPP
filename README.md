@@ -1,4 +1,4 @@
-# Prosoduc Cues and Modeling Strategies in Swedish Prominence Prediction
+# Prosodic Cues and Modeling Strategies in Swedish Prominence Prediction
 
 ## Quickstart (Inference First)
 
@@ -12,6 +12,12 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install torch numpy pandas librosa scikit-learn scipy matplotlib transformers tqdm
 ```
+
+Notes:
+
+- On first run, the Hugging Face model `KBLab/wav2vec2-large-voxrex-swedish` may be downloaded automatically.
+- This project has only been tested on Linux.
+- Inference works on CPU, but is significantly faster with a GPU-enabled PyTorch install.
 
 ### 2. Run inference with provided example data
 
