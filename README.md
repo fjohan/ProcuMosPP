@@ -222,6 +222,7 @@ Optional:
 
 - `--csv`: segments/tokens file
 - `--interval`, `--overlap`: sliding window settings if no CSV is provided
+- `--no_header`: write output CSV without a header row
 - `--praat`: write Praat outputs
 
 Included example files:
@@ -250,6 +251,17 @@ python prompred_infer.py \
   --interval 0.4 \
   --overlap 0.1 \
   --out_csv example_data/seg_006_windows_pred.csv
+```
+
+Example writing output CSV without a header:
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --wav example_data/seg_006.wav \
+  --csv example_data/seg_006.csv \
+  --out_csv example_data/seg_006_pred_noheader.csv \
+  --no_header
 ```
 
 Inference CSV accepted formats:

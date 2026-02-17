@@ -458,6 +458,7 @@ def main():
     ap.add_argument("--interval", type=float, default=0.4, help="Window length if no CSV")
     ap.add_argument("--overlap", type=float, default=0.1, help="Window overlap if no CSV")
     ap.add_argument("--out_csv", default=None, help="Output CSV path (default: <wavbase>_pred.csv)")
+    ap.add_argument("--no_header", action="store_true", help="Write output CSV without a header row")
     ap.add_argument("--praat", action="store_true", help="Write Praat TextGrid + prominence Sound")
     ap.add_argument("--out_prefix", default=None, help="Output prefix for Praat files (default: <wavbase>)")
     args = ap.parse_args()
@@ -572,7 +573,7 @@ def main():
     if mode == "csv":
         out_df["obs"] = obs
 
-    out_df.to_csv(out_csv, index=False)
+    out_df.to_csv(out_csv, index=False, header=not args.no_header)
     print(f"[Wrote] {out_csv}")
 
     # ----- Build full frame curve (for Praat Sound) -----
@@ -621,5 +622,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
