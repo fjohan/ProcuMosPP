@@ -452,10 +452,10 @@ def run_seed_experiment(seed, data_map):
                 t_np = y[0, :curr_len].cpu().numpy()
                 all_preds.extend(p_np)
                 all_targets.extend(t_np)
-                #if seed == SEEDS_TO_TEST[0] and idx == 1:
-                #    visualize_file_prominence(wavs[0], csvs[0], p_np, f"plots/{test_spk}_viz.png")
-                if seed == SEEDS_TO_TEST[0]:
-                    visualize_file_prominence(wavs[0], csvs[0], p_np, f"plots/{test_spk}_viz_{idx}.png")
+                if seed == SEEDS_TO_TEST[0] and idx == 1:
+                    visualize_file_prominence(wavs[0], csvs[0], p_np, f"plots/{test_spk}_viz.png")
+                #if seed == SEEDS_TO_TEST[0]:
+                #    visualize_file_prominence(wavs[0], csvs[0], p_np, f"plots/{test_spk}_viz_{idx}.png")
 
         corr, _ = pearsonr(all_targets, all_preds)
         mse = np.mean((np.array(all_targets) - np.array(all_preds))**2)
