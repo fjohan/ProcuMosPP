@@ -447,21 +447,199 @@ def segments_from_windows(duration, interval=0.4, overlap=0.1):
             break
     return segs
 
+def _find_matching_csv_for_wav(wav_path):
+    base_no_ext = os.path.splitext(wav_path)[0]
+    csv_path = base_no_ext + ".csv"
+    if os.path.exists(csv_path):
+        return csv_path
+
+    # Fallback for case variants like .CSV
+    folder = os.path.dirname(wav_path) or "."
+    target = os.path.basename(base_no_ext).lower()
+    for name in os.listdir(folder):
+        stem, ext = os.path.splitext(name)
+        if stem.lower() == target and ext.lower() == ".csv":
+            return os.path.join(folder, name)
+    return None
+
+def discover_wav_csv_pairs(input_dir):
+    pairs = []
+    missing_csv = []
+
+    for root, _, files in os.walk(input_dir):
+        for name in files:
+            if not name.lower().endswith(".wav"):
+                continue
+            wav_path = os.path.join(root, name)
+            csv_path = _find_matching_csv_for_wav(wav_path)
+            if csv_path is None:
+                missing_csv.append(wav_path)
+            else:
+                pairs.append((wav_path, csv_path))
+
+    pairs.sort()
+    missing_csv.sort()
+    return pairs, missing_csv
+
+def run_inference_for_file(
+    wav_path,
+    csv_path,
+    args,
+    processor,
+    w2v_model,
+    model,
+    scalar_scaler,
+    frame_scaler,
+    use_raw_pitch,
+    use_pitch_shape,
+    use_scalars,
+    max_frames_per_word,
+    scalar_dim,
+    device,
+    out_csv_override=None,
+    inplace=False,
+    batch_mode=False,
+):
+    # ----- Build segments -----
+    if csv_path:
+        segs, _ = segments_from_csv(csv_path)
+        mode = "csv"
+    else:
+        duration = float(librosa.get_duration(path=wav_path))
+        segs = segments_from_windows(duration, args.interval, args.overlap)
+        mode = "windows"
+
+    # ----- Extract features for segments -----
+    frames_arr, scalars_arr, labels, starts, ends, obs, T_total, frame_dur = extract_segment_features(
+        wav_path,
+        segs,
+        processor,
+        w2v_model,
+        use_raw_pitch,
+        use_pitch_shape,
+        use_scalars,
+        max_frames_per_word,
+        device,
+    )
+
+    if len(labels) == 0:
+        raise RuntimeError(f"No valid segments extracted: {wav_path}")
+
+    # ----- Normalize (same as training) -----
+    scalars_arr = scalars_arr[:, :scalar_dim]
+    scalars_norm = scalar_scaler.transform(scalars_arr).astype(np.float32)
+
+    frames_norm = frames_arr.copy()
+    if use_raw_pitch and frame_scaler is not None:
+        n_items, n_frames, _ = frames_norm.shape
+        frames_norm[:, :, -1] = frame_scaler.transform(
+            frames_norm[:, :, -1].reshape(-1, 1)
+        ).reshape(n_items, n_frames)
+
+    # ----- Build tensors for model -----
+    frames_t = torch.tensor(frames_norm, dtype=torch.float32).unsqueeze(0).to(device)
+    scalars_t = torch.tensor(scalars_norm, dtype=torch.float32).unsqueeze(0).to(device)
+    lengths_t = torch.tensor([frames_norm.shape[0]], dtype=torch.long).to(device)
+
+    # ----- Predict -----
+    with torch.no_grad():
+        preds = model(frames_t, scalars_t, lengths_t).squeeze(0).cpu().numpy()
+
+    # ----- Output CSV -----
+    if inplace:
+        if mode != "csv":
+            raise RuntimeError("--inplace requires CSV-based inference.")
+        out_csv = csv_path
+        out_df = pd.DataFrame({
+            "start": starts,
+            "end": ends,
+            "word": labels,
+            "predicted_rating": preds,
+        })
+    else:
+        out_csv = out_csv_override
+        if out_csv is None:
+            out_csv = f"{os.path.splitext(wav_path)[0]}_pred.csv"
+        out_df = pd.DataFrame({
+            "start": starts,
+            "end": ends,
+            "label": labels,
+            "pred": preds,
+        })
+        if mode == "csv":
+            out_df["obs"] = obs
+
+    out_df.to_csv(out_csv, index=False, header=not args.no_header)
+    print(f"[Wrote] {out_csv}")
+
+    # ----- Build full frame curve (for Praat Sound) -----
+    acc = np.zeros((T_total,), dtype=np.float32)
+    cnt = np.zeros((T_total,), dtype=np.float32)
+
+    model_fps = 50.0
+    for s, e, p in zip(starts, ends, preds):
+        i0 = int(float(s) * model_fps)
+        i1 = int(float(e) * model_fps)
+        i0 = max(0, min(i0, T_total))
+        i1 = max(0, min(i1, T_total))
+        if i1 <= i0:
+            i1 = min(T_total, i0 + 1)
+        acc[i0:i1] += float(p)
+        cnt[i0:i1] += 1.0
+
+    curve = np.where(cnt > 0, acc / cnt, 0.0)
+
+    # ----- Praat output -----
+    if args.praat:
+        wavroot = os.path.splitext(wav_path)[0]
+        if args.out_prefix:
+            prefix = args.out_prefix
+            if batch_mode:
+                prefix = f"{args.out_prefix}_{os.path.basename(wavroot)}"
+        else:
+            prefix = wavroot
+        xmax = float(T_total) * frame_dur
+
+        tg_path = f"{prefix}_pred.TextGrid"
+        snd_path = f"{prefix}_prom.Sound"
+
+        if mode == "csv":
+            intervals = [(s, e, lab) for s, e, lab in zip(starts, ends, labels)]
+            write_textgrid_interval_tier(intervals, tg_path, xmax, tier_name="words")
+        else:
+            points = [((float(s) + float(e)) / 2.0, lab) for s, e, lab in zip(starts, ends, labels)]
+            write_textgrid_point_tier(points, tg_path, xmax, tier_name="segments")
+
+        write_praat_sound(curve.tolist(), frame_dur, snd_path)
+        print(f"[Wrote] {tg_path}")
+        print(f"[Wrote] {snd_path}")
+
 # ------------------------------------------------------------
 # Main inference
 # ------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", required=True, help="Saved .pt checkpoint from training (--mode all)")
-    ap.add_argument("--wav", required=True, help="Wav file")
+    ap.add_argument("--wav", default=None, help="Single wav file")
+    ap.add_argument("--input_dir", default=None, help="Recursively process wav/csv pairs under this directory")
     ap.add_argument("--csv", default=None, help="Optional CSV: start,end,word,rating (no header)")
     ap.add_argument("--interval", type=float, default=0.4, help="Window length if no CSV")
     ap.add_argument("--overlap", type=float, default=0.1, help="Window overlap if no CSV")
     ap.add_argument("--out_csv", default=None, help="Output CSV path (default: <wavbase>_pred.csv)")
+    ap.add_argument("--inplace", action="store_true", help="Directory mode only: overwrite input CSVs with start,end,word,predicted_rating")
     ap.add_argument("--no_header", action="store_true", help="Write output CSV without a header row")
     ap.add_argument("--praat", action="store_true", help="Write Praat TextGrid + prominence Sound")
     ap.add_argument("--out_prefix", default=None, help="Output prefix for Praat files (default: <wavbase>)")
     args = ap.parse_args()
+
+    if bool(args.wav) == bool(args.input_dir):
+        raise SystemExit("Specify exactly one of --wav or --input_dir.")
+    if args.inplace and not args.input_dir:
+        raise SystemExit("--inplace is only supported with --input_dir.")
+    if args.input_dir and args.csv:
+        raise SystemExit("--csv is only supported with --wav.")
+    if args.input_dir and args.out_csv:
+        raise SystemExit("--out_csv is only supported with --wav.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -493,51 +671,6 @@ def main():
     w2v_model = Wav2Vec2Model.from_pretrained(W2V_MODEL_NAME).to(device)
     w2v_model.eval()
 
-    # ----- Build segments -----
-    y, sr = librosa.load(args.wav, sr=16000)
-    duration = float(librosa.get_duration(y=y, sr=sr))
-
-    if args.csv:
-        segs, df_in = segments_from_csv(args.csv)
-        mode = "csv"
-    else:
-        segs = segments_from_windows(duration, args.interval, args.overlap)
-        df_in = None
-        mode = "windows"
-
-    # ----- Extract features for segments -----
-    frames_arr, scalars_arr, labels, starts, ends, obs, T_total, frame_dur = extract_segment_features(
-        args.wav,
-        segs,
-        processor,
-        w2v_model,
-        USE_RAW_PITCH,
-        USE_PITCH_SHAPE,
-        USE_SCALARS,
-        MAX_FRAMES_PER_WORD,
-        device,
-    )
-
-    if len(labels) == 0:
-        raise SystemExit("No valid segments extracted (check timestamps / audio length).")
-
-    # ----- Normalize (same as training) -----
-    # Scalars
-    scalars_arr = scalars_arr[:, :SCALAR_DIM]
-    scalars_norm = scalar_scaler.transform(scalars_arr).astype(np.float32)
-
-    # Frames: if raw pitch, normalize last column with frame_scaler
-    frames_norm = frames_arr.copy()
-    if USE_RAW_PITCH and frame_scaler is not None:
-        N, T, F = frames_norm.shape
-        frames_norm[:, :, -1] = frame_scaler.transform(frames_norm[:, :, -1].reshape(-1, 1)).reshape(N, T)
-
-    # ----- Build tensors for model -----
-    # Model expects [B, SeqLen, MaxFrames, FrameDim], [B, SeqLen, ScalarDim]
-    frames_t = torch.tensor(frames_norm, dtype=torch.float32).unsqueeze(0).to(device)   # [1, N, T, F]
-    scalars_t = torch.tensor(scalars_norm, dtype=torch.float32).unsqueeze(0).to(device) # [1, N, Sdim]
-    lengths_t = torch.tensor([frames_norm.shape[0]], dtype=torch.long).to(device)       # [1]
-
     # ----- Build model and load weights -----
     model = ProminencePredictor(
         frame_dim=FRAME_DIM,
@@ -552,74 +685,69 @@ def main():
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
 
-    # ----- Predict -----
-    with torch.no_grad():
-        preds = model(frames_t, scalars_t, lengths_t).squeeze(0).cpu().numpy()  # [N]
+    if args.input_dir:
+        pairs, missing_csv = discover_wav_csv_pairs(args.input_dir)
+        if len(pairs) == 0:
+            raise SystemExit(f"No wav/csv pairs found under: {args.input_dir}")
 
-    # ----- Output CSV -----
-    out_csv = args.out_csv
-    if out_csv is None:
-        base = os.path.splitext(os.path.basename(args.wav))[0]
-        out_csv = f"{base}_pred.csv"
+        print(f"[Info] Found {len(pairs)} wav/csv pairs under {args.input_dir}")
+        if missing_csv:
+            print(f"[Info] Skipping {len(missing_csv)} wav file(s) without matching CSV.")
+            for path in missing_csv:
+                print(f"  [Skip] {path}")
 
-    out_df = pd.DataFrame({
-        "start": starts,
-        "end": ends,
-        "label": labels,
-        "pred": preds,
-    })
+        if args.inplace:
+            print("[Info] --inplace enabled: matched CSV files will be overwritten.")
 
-    # include observed if CSV-mode
-    if mode == "csv":
-        out_df["obs"] = obs
+        ok = 0
+        failed = 0
+        for wav_path, csv_path in pairs:
+            try:
+                run_inference_for_file(
+                    wav_path=wav_path,
+                    csv_path=csv_path,
+                    args=args,
+                    processor=processor,
+                    w2v_model=w2v_model,
+                    model=model,
+                    scalar_scaler=scalar_scaler,
+                    frame_scaler=frame_scaler,
+                    use_raw_pitch=USE_RAW_PITCH,
+                    use_pitch_shape=USE_PITCH_SHAPE,
+                    use_scalars=USE_SCALARS,
+                    max_frames_per_word=MAX_FRAMES_PER_WORD,
+                    scalar_dim=SCALAR_DIM,
+                    device=device,
+                    out_csv_override=None,
+                    inplace=args.inplace,
+                    batch_mode=True,
+                )
+                ok += 1
+            except Exception as exc:
+                failed += 1
+                print(f"[Error] {wav_path}: {exc}")
 
-    out_df.to_csv(out_csv, index=False, header=not args.no_header)
-    print(f"[Wrote] {out_csv}")
-
-    # ----- Build full frame curve (for Praat Sound) -----
-    # We create a piecewise-constant curve on the wav2vec frame grid (T_total frames).
-    # If overlapping windows exist, we average predictions on overlapping frames.
-    acc = np.zeros((T_total,), dtype=np.float32)
-    cnt = np.zeros((T_total,), dtype=np.float32)
-
-    MODEL_FPS = 50.0
-    for s, e, p in zip(starts, ends, preds):
-        i0 = int(float(s) * MODEL_FPS)
-        i1 = int(float(e) * MODEL_FPS)
-        i0 = max(0, min(i0, T_total))
-        i1 = max(0, min(i1, T_total))
-        if i1 <= i0:
-            i1 = min(T_total, i0 + 1)
-        acc[i0:i1] += float(p)
-        cnt[i0:i1] += 1.0
-
-    curve = np.where(cnt > 0, acc / cnt, 0.0)
-
-    # ----- Praat output -----
-    if args.praat:
-        wavbase = os.path.splitext(os.path.basename(args.wav))[0]
-        prefix = args.out_prefix if args.out_prefix else wavbase
-        xmax = float(T_total) * frame_dur
-
-        tg_path = f"{prefix}_pred.TextGrid"
-        snd_path = f"{prefix}_prom.Sound"
-
-        # TextGrid strategy:
-        # - CSV mode: IntervalTier with word labels (gaps filled)
-        # - Window mode (overlap likely): PointTier with segment centers (labels 1..N)
-        if mode == "csv":
-            intervals = [(s, e, lab) for s, e, lab in zip(starts, ends, labels)]
-            write_textgrid_interval_tier(intervals, tg_path, xmax, tier_name="words")
-        else:
-            # For overlaps, interval tier is misleading; use point tier at segment centers.
-            points = [((float(s) + float(e)) / 2.0, lab) for s, e, lab in zip(starts, ends, labels)]
-            write_textgrid_point_tier(points, tg_path, xmax, tier_name="segments")
-
-        write_praat_sound(curve.tolist(), frame_dur, snd_path)
-
-        print(f"[Wrote] {tg_path}")
-        print(f"[Wrote] {snd_path}")
+        print(f"[Summary] processed={ok}, failed={failed}, skipped_no_csv={len(missing_csv)}")
+    else:
+        run_inference_for_file(
+            wav_path=args.wav,
+            csv_path=args.csv,
+            args=args,
+            processor=processor,
+            w2v_model=w2v_model,
+            model=model,
+            scalar_scaler=scalar_scaler,
+            frame_scaler=frame_scaler,
+            use_raw_pitch=USE_RAW_PITCH,
+            use_pitch_shape=USE_PITCH_SHAPE,
+            use_scalars=USE_SCALARS,
+            max_frames_per_word=MAX_FRAMES_PER_WORD,
+            scalar_dim=SCALAR_DIM,
+            device=device,
+            out_csv_override=args.out_csv,
+            inplace=False,
+            batch_mode=False,
+        )
 
 if __name__ == "__main__":
     main()
-

@@ -148,7 +148,7 @@ pip install torch numpy pandas librosa scikit-learn scipy matplotlib transformer
 ### 6.2 Expected Training Data Layout
 
 `prompred_train.py` expects a `data/` directory in the project root.  
-Inside `data/`, each speaker gets a subfolder. Each `.wav` must have a matching `.csv` with the same basename.
+Inside `data/`, each speaker gets a subfolder. Each `.wav` must have a matching `.csv` with the same basename. The `.csv` must be headerless.
 
 Expected structure:
 
@@ -165,10 +165,9 @@ data/
     ...
 ```
 
-Expected training CSV format (no header):
+Expected training CSV format (no header, but columns are start, end, word, rating):
 
 ```text
-start,end,word,rating
 0.12,0.41,det,0.35
 0.41,0.88,huset,1.42
 ```
@@ -216,12 +215,14 @@ Outputs:
 Required inputs:
 
 - `--checkpoint`: trained `.pt` checkpoint (for example from `models/`)
-- `--wav`: input wav file
+- either `--wav` (single-file mode) or `--input_dir` (batch directory mode)
 
 Optional:
 
 - `--csv`: segments/tokens file
 - `--interval`, `--overlap`: sliding window settings if no CSV is provided
+- `--input_dir`: recursively find `.wav` + matching `.csv` basename pairs
+- `--inplace`: directory mode only; overwrite matched CSVs with `start,end,word,predicted_rating`
 - `--no_header`: write output CSV without a header row
 - `--praat`: write Praat outputs
 
@@ -252,6 +253,29 @@ python prompred_infer.py \
   --overlap 0.1 \
   --out_csv example_data/seg_006_windows_pred.csv
 ```
+
+Example batch inference over a directory tree:
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --input_dir example_data
+```
+
+Example batch inference with in-place CSV overwrite:
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --input_dir example_data \
+  --inplace
+```
+
+Notes:
+
+- In directory mode, the script descends recursively and processes files where `<name>.wav` and `<name>.csv` both exist.
+- In directory mode with `--inplace`, each matched CSV is overwritten with: `start,end,word,predicted_rating`.
+- Sliding-window inference (`--interval` / `--overlap`) remains available in single-file mode (`--wav`) when no `--csv` is provided.
 
 Example writing output CSV without a header:
 
