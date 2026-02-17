@@ -1,8 +1,12 @@
 # Prosodic Cues and Modeling Strategies in Swedish Prominence Prediction
 
+## Contents
+
+This repo contains a model for prominence prediction and scripts to (a) perform inference and (b) train such a model. The model is based on five speakers and has been evaluated using a Leave-One-Speaker-Out (LOSO) cross-validation paradigm (see "2. Methodology"), but the model provided here is trained on all five speakers.
+
 ## Quickstart (Inference First)
 
-If you only want to run inference with the included example files, use this section.
+To run inference with the included example files, use this section.
 
 ### 1. Install dependencies
 
@@ -32,22 +36,20 @@ python prompred_infer.py \
   --praat
 ```
 
-Another example:
-
-```bash
-python prompred_infer.py \
-  --checkpoint models/prom_model_full_seed142857.pt \
-  --wav example_data/seg_023.wav \
-  --csv example_data/seg_023.csv \
-  --out_csv example_data/seg_023_pred.csv
-```
-
 ### 3. Output files
 
 - Prediction CSV, e.g. `example_data/seg_006_pred.csv`
 - With `--praat`:
   - `<prefix>_pred.TextGrid`
   - `<prefix>_prom.Sound`
+
+Tip (Praat workflow):
+
+- Open the original `.wav`, the produced `*_prom.Sound`, and the produced `*_pred.TextGrid` in Praat.
+- Resample `*_prom.Sound` with a sampling frequency of `16000 Hz` and precision `1`.
+- Combine the original `.wav` and the resampled prominence sound into stereo.
+- View the stereo sound together with the TextGrid.
+- Optionally mute channel 2 while inspecting results.
 
 ### 4. Sliding-window mode (no CSV)
 
@@ -62,21 +64,13 @@ python prompred_infer.py \
 
 See "6.5 Caveat: Fixed-Interval Inference and Silence" before using this mode on long recordings.
 
-Tip (Praat workflow):
-
-- Open the original `.wav`, the produced `*_prom.Sound`, and the produced `*_pred.TextGrid` in Praat.
-- Resample `*_prom.Sound` with sampling frequency `16000 Hz` and precision `1`.
-- Combine the original wav and the resampled prominence sound into stereo.
-- View the stereo sound together with the TextGrid.
-- Optionally mute channel 2 while inspecting alignment.
-
 ## 1. Introduction
-This study investigates the prediction of word-level prominence in Swedish news speech. The goal was to predict continuous prominence ratings (scale 0–2) derived from mass crowdsourcing (20+ raters per file). We compared two pre-trained Wav2Vec 2.0 backbones—one generic and one language-specific—across three levels of architectural complexity to determine the optimal configuration for small-data prosody modeling.
+This repo is the result of a study that investigates word-level prominence prediction in Swedish news speech. The goal was to predict continuous prominence ratings (scale 0-2) derived from mass crowdsourcing (20+ raters per file). We compared two pre-trained Wav2Vec 2.0 backbones, one generic and one language-specific, across three levels of architectural complexity to determine the optimal configuration for small-data prosody modeling.
 
 ## 2. Methodology
 
 ### 2.1 Dataset
-The dataset consists of approximately 130 audio files (total duration ~20 minutes) featuring 5 speakers (3 male, 2 female) reading news in a homogenous Swedish dialect. Labels are mean per-word prominence ratings. Training was performed using Leave-One-Speaker-Out (LOSO) cross-validation to ensure speaker independence.
+The dataset consists of approximately 130 audio files (total duration ~20 minutes) featuring 5 speakers (3 male, 2 female) reading news in a homogeneous Swedish dialect. Labels are mean per-word prominence ratings. Training was performed using Leave-One-Speaker-Out (LOSO) cross-validation to ensure speaker independence.
 
 ### 2.2 Backbone Models
 We compared two pre-trained feature extractors:
@@ -91,24 +85,24 @@ We evaluated three incremental configurations:
     *   **Loss:** Standard Mean Squared Error (MSE).
     *   **Input:** Frozen W2V2 embeddings + Log Duration.
 *   **Config 2: AWM (Architectural Enhancements)**
-    *   **A (Attention):** Learned Attention Pooling to focus on the syllabic nucleus rather than averaging silence/consonants.
-    *   **W (Weighted Loss):** Custom loss function weighing high-prominence targets ($y>1.0$) 5x higher than non-prominent ones to combat "regression to the mean."
+    *   **A (Attention):** Learned attention pooling that can focus on the most informative frames within each word, instead of uniformly averaging all frames.
+    *   **W (Weighted Loss):** Target-dependent weighted MSE, $w = 1 + 2y$ (for $y \ge 0$), which upweights higher-prominence targets (up to ~5x at $y=2$) to combat "regression to the mean."
     *   **M (Max Pooling):** Hybrid pooling concatenating the *Max* activation with the *Attention* vector to capture peak intensity.
 *   **Config 3: PiSh (Pitch Shapes & Scalars)**
     *   **Includes all AWM features.**
-    *   **Explicit Prosody:** Injection of 7 scalar features per word into the LSTM:
+    *   **Explicit Prosody:** Adding 8 scalar features per word:
         *   *Pitch Shape:* 2nd-degree polynomial coefficients (Curvature, Slope, Height) + Residual Error to capture rises/falls/peaks.
         *   *Stats:* Log Duration, RMS Mean, RMS Max, Spectral Centroid.
 
 ## 3. Results
-Results are reported as the mean Pearson Correlation ($r$) and Mean Squared Error (MSE) across 3 random seeds (30–35 epochs).
+Results are reported as the mean Pearson Correlation ($r$) and Mean Squared Error (MSE) across 5 random seeds (30–35 epochs).
 
 | Model Backbone | Configuration | Correlation ($r$) | MSE | Analysis |
 | :--- | :--- | :--- | :--- | :--- |
 | **VoxRex (Swedish)** | **Bare** | 0.7288 | 0.0394 | Strong baseline due to language fit. |
 | | **AWM** | **0.7957** | 0.0331 | **Major improvement (+0.07)**. Attention unlocks the model's potential. |
 | | **PiSh** | **0.7987** | **0.0311** | Minimal $r$ gain, but **lowest MSE**. Reduced variance. |
-| **W2V2 (Generic)** | **Bare** | 0.6877 | 0.0438 | Struggles with Swedish prosody alignment. |
+| **W2V2 (Generic)** | **Bare** | 0.6877 | 0.0438 | No language-specific knowledge. |
 | | **AWM** | 0.7046 | 0.0440 | Moderate improvement. |
 | | **PiSh** | 0.7238 | 0.0416 | **Significant gain**. Explicit features compensate for lack of language knowledge. |
 
@@ -120,8 +114,8 @@ The Swedish-specific **VoxRex** model consistently outperformed the generic W2V2
 ### 4.2 Architecture unlocks representations (The "AWM" Jump)
 For VoxRex, the jump from **Bare** (0.72) to **AWM** (0.79) is dramatic.
 *   *Mean pooling* acts as a low-pass filter, smoothing out the sharp peaks that characterize prominence.
-*   *Attention* and *Max Pooling* allow the model to pinpoint the stressed vowel and peak energy, which aligns better with human perception of prominence.
-*   *Weighted Loss* successfully forced the model to predict values $>1.0$, reducing the "safe bet" under-prediction seen in early baselines.
+*   *Attention* and *Max Pooling* let the model emphasize informative and high-activation frames within each word, which better preserves prominence-related cues than mean pooling alone.
+*   *Weighted Loss* increased the penalty for underestimating higher-prominence targets, reducing the "safe bet" under-prediction seen in early baselines.
 
 ### 4.3 Explicit Features: Calibration vs. Detection
 Adding **Pitch Shapes (PiSh)** had different effects on the two models:
@@ -129,7 +123,7 @@ Adding **Pitch Shapes (PiSh)** had different effects on the two models:
 *   **For W2V2:** Adding pitch shapes improved both $r$ and MSE. Since the generic model lacks deep knowledge of Swedish prosodic structure, providing explicit contour information (rises/falls) acted as a crucial crutch, helping it close the gap.
 
 ## 5. Conclusion
-We have established a robust pipeline for Swedish prominence prediction. The optimal configuration uses a **language-specific transformer (VoxRex)** combined with **Attention/Max pooling** and **Weighted Loss**. While explicit **Pitch Shape** features offer diminishing returns for correlation on the best model, they provide the most stable and accurate amplitude predictions (lowest MSE), making them valuable for high-precision applications.
+We have established a robust pipeline for Swedish prominence prediction. The optimal configuration uses a **language-specific transformer (VoxRex)** combined with **Attention/Max pooling** and **Weighted Loss**. While explicit **Pitch Shape** features offer diminishing returns for correlation on the best model, they provide the most stable and accurate amplitude predictions (lowest MSE), making them valuable for future exploration.
 
 ## 6. Running the Code
 
@@ -247,17 +241,6 @@ python prompred_infer.py \
   --out_csv example_data/seg_006_pred.csv \
   --praat
 ```
-
-Another CSV-based example:
-
-```bash
-python prompred_infer.py \
-  --checkpoint models/prom_model_full_seed142857.pt \
-  --wav example_data/seg_023.wav \
-  --csv example_data/seg_023.csv \
-  --out_csv example_data/seg_023_pred.csv
-```
-
 Example with automatic sliding windows (no CSV):
 
 ```bash
