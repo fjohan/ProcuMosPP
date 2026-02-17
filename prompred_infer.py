@@ -481,6 +481,67 @@ def discover_wav_csv_pairs(input_dir):
     missing_csv.sort()
     return pairs, missing_csv
 
+def _moving_average_1d(x, win):
+    if win <= 1:
+        return x
+    kernel = np.ones((win,), dtype=np.float32) / float(win)
+    return np.convolve(x, kernel, mode="same")
+
+def _frame_energy_mask(
+    y,
+    sr,
+    total_frames,
+    frame_length=1024,
+    hop_length=320,
+    rms_db_thresh=None,
+    rms_db_percentile=20.0,
+):
+    rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=hop_length)[0]
+    rms = np.maximum(rms, 1e-10)
+    rms_db = 20.0 * np.log10(rms)
+
+    if len(rms_db) < total_frames:
+        if len(rms_db) == 0:
+            rms_db = np.full((total_frames,), -120.0, dtype=np.float32)
+        else:
+            pad = np.full((total_frames - len(rms_db),), float(rms_db[-1]), dtype=np.float32)
+            rms_db = np.concatenate([rms_db.astype(np.float32), pad], axis=0)
+    else:
+        rms_db = rms_db[:total_frames].astype(np.float32)
+
+    if rms_db_thresh is None:
+        thresh = float(np.percentile(rms_db, rms_db_percentile))
+    else:
+        thresh = float(rms_db_thresh)
+
+    return (rms_db >= thresh), rms_db, thresh
+
+def _librosa_vad_mask(
+    y,
+    sr,
+    total_frames,
+    top_db=35.0,
+    frame_length=1024,
+    hop_length=320,
+):
+    intervals = librosa.effects.split(
+        y,
+        top_db=float(top_db),
+        frame_length=frame_length,
+        hop_length=hop_length,
+    )
+
+    mask = np.zeros((total_frames,), dtype=bool)
+    model_fps = float(sr) / float(hop_length)  # 50fps for 16k/320
+    for s, e in intervals:
+        i0 = int((float(s) / float(sr)) * model_fps)
+        i1 = int(np.ceil((float(e) / float(sr)) * model_fps))
+        i0 = max(0, min(i0, total_frames))
+        i1 = max(0, min(i1, total_frames))
+        if i1 > i0:
+            mask[i0:i1] = True
+    return mask
+
 def run_inference_for_file(
     wav_path,
     csv_path,
@@ -545,6 +606,56 @@ def run_inference_for_file(
     with torch.no_grad():
         preds = model(frames_t, scalars_t, lengths_t).squeeze(0).cpu().numpy()
 
+    # ----- Optional non-speech mitigation (energy mask / VAD / smoothing) -----
+    final_mask = np.ones((T_total,), dtype=bool)
+    mitigation_used = False
+
+    if args.suppress_silence or args.use_vad:
+        y_mask, sr_mask = librosa.load(wav_path, sr=16000)
+
+        if args.suppress_silence:
+            energy_mask, _, used_thresh = _frame_energy_mask(
+                y=y_mask,
+                sr=sr_mask,
+                total_frames=T_total,
+                frame_length=1024,
+                hop_length=320,
+                rms_db_thresh=args.rms_db_thresh,
+                rms_db_percentile=args.rms_db_percentile,
+            )
+            final_mask &= energy_mask
+            mitigation_used = True
+            print(f"[Info] Energy mask threshold for {wav_path}: {used_thresh:.2f} dB")
+
+        if args.use_vad:
+            vad_mask = _librosa_vad_mask(
+                y=y_mask,
+                sr=sr_mask,
+                total_frames=T_total,
+                top_db=args.vad_top_db,
+                frame_length=1024,
+                hop_length=320,
+            )
+            final_mask &= vad_mask
+            mitigation_used = True
+            print(f"[Info] VAD mask applied for {wav_path} (top_db={args.vad_top_db})")
+
+        # Segment-level suppression so CSV predictions match masked curve behavior.
+        model_fps = 50.0
+        for i, (s, e) in enumerate(zip(starts, ends)):
+            i0 = int(float(s) * model_fps)
+            i1 = int(float(e) * model_fps)
+            i0 = max(0, min(i0, T_total))
+            i1 = max(0, min(i1, T_total))
+            if i1 <= i0:
+                i1 = min(T_total, i0 + 1)
+            seg_mask = final_mask[i0:i1]
+            speech_ratio = float(np.mean(seg_mask)) if len(seg_mask) else 0.0
+            if speech_ratio < args.silence_zero_thresh:
+                preds[i] = 0.0
+            else:
+                preds[i] = preds[i] * speech_ratio
+
     # ----- Output CSV -----
     if inplace:
         if mode != "csv":
@@ -589,6 +700,17 @@ def run_inference_for_file(
 
     curve = np.zeros_like(acc)
     np.divide(acc, cnt, out=curve, where=cnt > 0)
+    if mitigation_used:
+        curve = curve * final_mask.astype(np.float32)
+
+    if args.smooth_ms > 0:
+        win = int(round((args.smooth_ms / 1000.0) / frame_dur))
+        if win > 1:
+            if win % 2 == 0:
+                win += 1
+            curve = _moving_average_1d(curve, win).astype(np.float32)
+            if mitigation_used:
+                curve = curve * final_mask.astype(np.float32)
 
     # ----- Praat output -----
     if args.praat:
@@ -629,6 +751,13 @@ def main():
     ap.add_argument("--out_csv", default=None, help="Output CSV path (default: <wavbase>_pred.csv)")
     ap.add_argument("--inplace", action="store_true", help="Directory mode only: overwrite input CSVs with start,end,word,predicted_rating")
     ap.add_argument("--no_header", action="store_true", help="Write output CSV without a header row")
+    ap.add_argument("--suppress_silence", action="store_true", help="Apply energy-based masking of non-speech regions")
+    ap.add_argument("--rms_db_thresh", type=float, default=None, help="Absolute RMS threshold in dB for --suppress_silence (default: adaptive percentile)")
+    ap.add_argument("--rms_db_percentile", type=float, default=20.0, help="Adaptive RMS threshold percentile for --suppress_silence when --rms_db_thresh is not set")
+    ap.add_argument("--use_vad", action="store_true", help="Apply optional librosa-based VAD mask")
+    ap.add_argument("--vad_top_db", type=float, default=35.0, help="VAD top_db for --use_vad (higher = stricter silence rejection)")
+    ap.add_argument("--silence_zero_thresh", type=float, default=0.2, help="Zero segment prediction if speech-mask ratio falls below this value")
+    ap.add_argument("--smooth_ms", type=float, default=0.0, help="Optional moving-average smoothing in milliseconds for output prominence curve")
     ap.add_argument("--praat", action="store_true", help="Write Praat TextGrid + prominence Sound")
     ap.add_argument("--out_prefix", default=None, help="Output prefix for Praat files (default: <wavbase>)")
     args = ap.parse_args()

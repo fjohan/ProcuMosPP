@@ -224,6 +224,13 @@ Optional:
 - `--input_dir`: recursively find `.wav` + matching `.csv` basename pairs
 - `--inplace`: directory mode only; overwrite matched CSVs with `start,end,word,predicted_rating`
 - `--no_header`: write output CSV without a header row
+- `--suppress_silence`: apply energy-based masking of non-speech regions
+- `--rms_db_thresh`: absolute RMS threshold in dB for `--suppress_silence` (optional)
+- `--rms_db_percentile`: adaptive RMS threshold percentile when `--rms_db_thresh` is not set
+- `--use_vad`: apply optional librosa-based VAD mask
+- `--vad_top_db`: VAD sensitivity for `--use_vad`
+- `--silence_zero_thresh`: zero segment prediction if speech-mask ratio is below this threshold
+- `--smooth_ms`: moving-average smoothing (ms) for the output prominence curve
 - `--praat`: write Praat outputs
 
 Included example files:
@@ -260,7 +267,7 @@ Example batch inference over a directory tree with in-place CSV without header o
 python prompred_infer.py \
   --checkpoint models/prom_model_full_seed142857.pt \
   --input_dir example_data \
-  --inplace
+  --inplace \
   --no_header
 ```
 
@@ -305,5 +312,36 @@ Recommendations:
   - Adding a simple energy threshold to suppress predictions during silence.
   - Running a Voice Activity Detection (VAD) step before inference.
   - Post-processing the prominence curve to zero out low-energy regions.
+
+Mitigation example (single-file sliding windows):
+
+```bash
+python prompred_infer.py \
+  --checkpoint models/prom_model_full_seed142857.pt \
+  --wav example_data/seg_006.wav \
+  --interval 0.4 \
+  --overlap 0.1 \
+  --suppress_silence \
+  --use_vad \
+  --smooth_ms 120 \
+  --out_csv example_data/seg_006_windows_mitigated_pred.csv
+```
+
+Suggested presets:
+
+- Conservative (minimal suppression):
+```bash
+python prompred_infer.py --checkpoint models/prom_model_full_seed142857.pt --wav example_data/seg_006.wav --interval 0.4 --overlap 0.1 --suppress_silence --rms_db_percentile 10 --silence_zero_thresh 0.10 --smooth_ms 60 --out_csv example_data/seg_006_windows_cons_pred.csv
+```
+
+- Balanced (recommended starting point):
+```bash
+python prompred_infer.py --checkpoint models/prom_model_full_seed142857.pt --wav example_data/seg_006.wav --interval 0.4 --overlap 0.1 --suppress_silence --use_vad --rms_db_percentile 20 --vad_top_db 35 --silence_zero_thresh 0.20 --smooth_ms 120 --out_csv example_data/seg_006_windows_balanced_pred.csv
+```
+
+- Aggressive (strong silence rejection):
+```bash
+python prompred_infer.py --checkpoint models/prom_model_full_seed142857.pt --wav example_data/seg_006.wav --interval 0.4 --overlap 0.1 --suppress_silence --use_vad --rms_db_percentile 35 --vad_top_db 25 --silence_zero_thresh 0.35 --smooth_ms 180 --out_csv example_data/seg_006_windows_aggressive_pred.csv
+```
 
 This limitation does not affect inference when using word-aligned CSV input.
