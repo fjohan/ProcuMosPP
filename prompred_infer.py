@@ -587,7 +587,8 @@ def run_inference_for_file(
         acc[i0:i1] += float(p)
         cnt[i0:i1] += 1.0
 
-    curve = np.where(cnt > 0, acc / cnt, 0.0)
+    curve = np.zeros_like(acc)
+    np.divide(acc, cnt, out=curve, where=cnt > 0)
 
     # ----- Praat output -----
     if args.praat:
