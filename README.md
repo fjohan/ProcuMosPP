@@ -254,21 +254,14 @@ python prompred_infer.py \
   --out_csv example_data/seg_006_windows_pred.csv
 ```
 
-Example batch inference over a directory tree:
-
-```bash
-python prompred_infer.py \
-  --checkpoint models/prom_model_full_seed142857.pt \
-  --input_dir example_data
-```
-
-Example batch inference with in-place CSV overwrite:
+Example batch inference over a directory tree with in-place CSV without header overwrite:
 
 ```bash
 python prompred_infer.py \
   --checkpoint models/prom_model_full_seed142857.pt \
   --input_dir example_data \
   --inplace
+  --no_header
 ```
 
 Notes:
@@ -276,17 +269,6 @@ Notes:
 - In directory mode, the script descends recursively and processes files where `<name>.wav` and `<name>.csv` both exist.
 - In directory mode with `--inplace`, each matched CSV is overwritten with: `start,end,word,predicted_rating`.
 - Sliding-window inference (`--interval` / `--overlap`) remains available in single-file mode (`--wav`) when no `--csv` is provided.
-
-Example writing output CSV without a header:
-
-```bash
-python prompred_infer.py \
-  --checkpoint models/prom_model_full_seed142857.pt \
-  --wav example_data/seg_006.wav \
-  --csv example_data/seg_006.csv \
-  --out_csv example_data/seg_006_pred_noheader.csv \
-  --no_header
-```
 
 Inference CSV accepted formats:
 
