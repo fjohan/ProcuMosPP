@@ -43,6 +43,14 @@
       <h2>Interactive demo</h2>
       <p class="sub">Listen to a Swedish clip and compare plain Whisper-style text vs enriched prominence view.</p>
 
+      <div class="controls">
+        <label for="exampleSelect"><strong>Example:</strong></label>
+        <select id="exampleSelect" class="select">
+          <option value="seg_023">seg_023</option>
+          <option value="seg_006">seg_006</option>
+        </select>
+      </div>
+
       <div class="audio-wrap">
         <audio id="audio" controls preload="metadata">
           <source src="example_data/seg_023.wav" type="audio/wav" />
@@ -75,6 +83,12 @@
         <h3>Word timeline (prominence-aware)</h3>
         <div id="timeline" class="timeline"></div>
       </article>
+
+      <article class="card">
+        <h3>Model prominence curve</h3>
+        <p class="sub">Predicted prominence by word midpoint (from <code>*_pred.csv</code>).</p>
+        <svg id="promChart" class="chart" viewBox="0 0 900 260" preserveAspectRatio="none" role="img" aria-label="Prominence graph"></svg>
+      </article>
     </section>
 
     <section class="panel">
@@ -97,8 +111,7 @@
   </main>
 
   <footer class="footer">
-    <p>Demo clip: <code>example_data/seg_023.wav</code> | Timestamps from <code>example_data/seg_023.csv</code></p>
-    <p>Prominence values shown on this page are illustrative demo scores.</p>
+    <p>Demo clips: <code>example_data/seg_006.wav</code>, <code>example_data/seg_023.wav</code> with predictions from matching <code>*_pred.csv</code>.</p>
   </footer>
 
   <script src="script.js"></script>
