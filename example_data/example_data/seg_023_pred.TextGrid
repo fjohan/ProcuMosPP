@@ -1,0 +1,122 @@
+File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0
+xmax = 6.82
+tiers? <exists>
+size = 1
+item []:
+    item [1]:
+        class = "IntervalTier"
+        name = "words"
+        xmin = 0
+        xmax = 6.82
+        intervals: size = 27
+        intervals [1]:
+            xmin = 0.0
+            xmax = 0.6010000109672546
+            text = "Forskare"
+        intervals [2]:
+            xmin = 0.6010000109672546
+            xmax = 0.6809999942779541
+            text = ""
+        intervals [3]:
+            xmin = 0.6809999942779541
+            xmax = 0.8009999990463257
+            text = "vid"
+        intervals [4]:
+            xmin = 0.8009999990463257
+            xmax = 0.8610000014305115
+            text = ""
+        intervals [5]:
+            xmin = 0.8610000014305115
+            xmax = 1.340999960899353
+            text = "Sveriges"
+        intervals [6]:
+            xmin = 1.340999960899353
+            xmax = 1.440999984741211
+            text = ""
+        intervals [7]:
+            xmin = 1.440999984741211
+            xmax = 2.7829999923706055
+            text = "lantbruksuniversitet"
+        intervals [8]:
+            xmin = 2.7829999923706055
+            xmax = 2.802999973297119
+            text = ""
+        intervals [9]:
+            xmin = 2.802999973297119
+            xmax = 2.882999897003174
+            text = "har"
+        intervals [10]:
+            xmin = 2.882999897003174
+            xmax = 2.9230000972747803
+            text = ""
+        intervals [11]:
+            xmin = 2.9230000972747803
+            xmax = 3.122999906539917
+            text = "tagit"
+        intervals [12]:
+            xmin = 3.122999906539917
+            xmax = 3.183000087738037
+            text = ""
+        intervals [13]:
+            xmin = 3.183000087738037
+            xmax = 3.36299991607666
+            text = "fram"
+        intervals [14]:
+            xmin = 3.36299991607666
+            xmax = 3.4030001163482666
+            text = ""
+        intervals [15]:
+            xmin = 3.4030001163482666
+            xmax = 3.5239999294281006
+            text = "ett"
+        intervals [16]:
+            xmin = 3.5239999294281006
+            xmax = 3.6040000915527344
+            text = ""
+        intervals [17]:
+            xmin = 3.6040000915527344
+            xmax = 3.8239998817443848
+            text = "nytt"
+        intervals [18]:
+            xmin = 3.8239998817443848
+            xmax = 3.8440001010894775
+            text = ""
+        intervals [19]:
+            xmin = 3.8440001010894775
+            xmax = 3.944000005722046
+            text = "och"
+        intervals [20]:
+            xmin = 3.944000005722046
+            xmax = 3.9839999675750732
+            text = ""
+        intervals [21]:
+            xmin = 3.9839999675750732
+            xmax = 4.363999843597412
+            text = "hållbart"
+        intervals [22]:
+            xmin = 4.363999843597412
+            xmax = 4.445000171661377
+            text = ""
+        intervals [23]:
+            xmin = 4.445000171661377
+            xmax = 5.164999961853027
+            text = "fiskfoder,"
+        intervals [24]:
+            xmin = 5.164999961853027
+            xmax = 5.204999923706055
+            text = ""
+        intervals [25]:
+            xmin = 5.204999923706055
+            xmax = 5.665999889373779
+            text = "rapporterar"
+        intervals [26]:
+            xmin = 5.665999889373779
+            xmax = 5.705999851226807
+            text = ""
+        intervals [27]:
+            xmin = 5.705999851226807
+            xmax = 6.827000141143799
+            text = "Vetenskapsradion."

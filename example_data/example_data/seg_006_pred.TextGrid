@@ -1,0 +1,146 @@
+File type = "ooTextFile"
+Object class = "TextGrid"
+
+xmin = 0
+xmax = 6.44
+tiers? <exists>
+size = 1
+item []:
+    item [1]:
+        class = "IntervalTier"
+        name = "words"
+        xmin = 0
+        xmax = 6.44
+        intervals: size = 33
+        intervals [1]:
+            xmin = 0.0
+            xmax = 0.921999990940094
+            text = ""
+        intervals [2]:
+            xmin = 0.921999990940094
+            xmax = 1.1610000133514404
+            text = "Jag"
+        intervals [3]:
+            xmin = 1.1610000133514404
+            xmax = 1.180999994277954
+            text = ""
+        intervals [4]:
+            xmin = 1.180999994277954
+            xmax = 1.3619999885559082
+            text = "kommer"
+        intervals [5]:
+            xmin = 1.3619999885559082
+            xmax = 1.4019999504089355
+            text = ""
+        intervals [6]:
+            xmin = 1.4019999504089355
+            xmax = 1.7350000143051147
+            text = "ihåg"
+        intervals [7]:
+            xmin = 1.7350000143051147
+            xmax = 1.8020000457763672
+            text = ""
+        intervals [8]:
+            xmin = 1.8020000457763672
+            xmax = 1.9179999828338623
+            text = "att"
+        intervals [9]:
+            xmin = 1.9179999828338623
+            xmax = 2.0880000591278076
+            text = ""
+        intervals [10]:
+            xmin = 2.0880000591278076
+            xmax = 2.263000011444092
+            text = "när"
+        intervals [11]:
+            xmin = 2.263000011444092
+            xmax = 2.302999973297119
+            text = ""
+        intervals [12]:
+            xmin = 2.302999973297119
+            xmax = 2.382999897003174
+            text = "vi"
+        intervals [13]:
+            xmin = 2.382999897003174
+            xmax = 2.4230000972747803
+            text = ""
+        intervals [14]:
+            xmin = 2.4230000972747803
+            xmax = 2.562999963760376
+            text = "hade"
+        intervals [15]:
+            xmin = 2.562999963760376
+            xmax = 2.6429998874664307
+            text = ""
+        intervals [16]:
+            xmin = 2.6429998874664307
+            xmax = 3.0840001106262207
+            text = "skördat"
+        intervals [17]:
+            xmin = 3.0840001106262207
+            xmax = 3.1040000915527344
+            text = ""
+        intervals [18]:
+            xmin = 3.1040000915527344
+            xmax = 3.2209999561309814
+            text = "på"
+        intervals [19]:
+            xmin = 3.2209999561309814
+            xmax = 3.2690000534057617
+            text = ""
+        intervals [20]:
+            xmin = 3.2690000534057617
+            xmax = 3.8440001010894775
+            text = "hösten,"
+        intervals [21]:
+            xmin = 3.8440001010894775
+            xmax = 4.485000133514404
+            text = ""
+        intervals [22]:
+            xmin = 4.485000133514404
+            xmax = 4.826000213623047
+            text = "tagit"
+        intervals [23]:
+            xmin = 4.826000213623047
+            xmax = 4.8460001945495605
+            text = ""
+        intervals [24]:
+            xmin = 4.8460001945495605
+            xmax = 4.886000156402588
+            text = "in"
+        intervals [25]:
+            xmin = 4.886000156402588
+            xmax = 4.966000080108643
+            text = ""
+        intervals [26]:
+            xmin = 4.966000080108643
+            xmax = 5.306000232696533
+            text = "spannmål"
+        intervals [27]:
+            xmin = 5.306000232696533
+            xmax = 5.326000213623047
+            text = ""
+        intervals [28]:
+            xmin = 5.326000213623047
+            xmax = 5.386000156402588
+            text = "och"
+        intervals [29]:
+            xmin = 5.386000156402588
+            xmax = 5.406000137329102
+            text = ""
+        intervals [30]:
+            xmin = 5.406000137329102
+            xmax = 5.565999984741211
+            text = "sånt"
+        intervals [31]:
+            xmin = 5.565999984741211
+            xmax = 5.585999965667725
+            text = ""
+        intervals [32]:
+            xmin = 5.585999965667725
+            xmax = 5.769000053405762
+            text = "där."
+        intervals [33]:
+            xmin = 5.769000053405762
+            xmax = 6.44
+            text = ""
