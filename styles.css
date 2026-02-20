@@ -1,0 +1,212 @@
+:root {
+  --bg: #f5f1e8;
+  --panel: #fffaf2;
+  --ink: #1b1b1b;
+  --muted: #5b5a57;
+  --accent: #005f73;
+  --accent-soft: #d8f0f4;
+  --border: #ded7c9;
+  --prom-low: #88b8c8;
+  --prom-mid: #ffd166;
+  --prom-high: #ef476f;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Source Sans 3", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 500px at 90% -10%, #cbe6d0 0%, transparent 70%),
+    radial-gradient(900px 450px at -10% 10%, #f2d6b3 0%, transparent 70%),
+    var(--bg);
+  line-height: 1.45;
+}
+
+.hero,
+.panel,
+.footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.hero { padding-top: 2rem; }
+.eyebrow {
+  font-size: 0.75rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+h1 {
+  margin: 0.25rem 0 0.75rem;
+  font-family: "Merriweather", Georgia, serif;
+  font-size: clamp(1.9rem, 4vw, 2.9rem);
+}
+
+h2 {
+  margin: 0 0 0.65rem;
+  font-family: "Merriweather", Georgia, serif;
+}
+
+h3 { margin-top: 0; }
+.lede { color: var(--muted); max-width: 68ch; }
+.sub { color: var(--muted); margin-top: 0; }
+
+.cta-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.btn {
+  display: inline-block;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--accent);
+}
+
+.panel { margin-top: 1rem; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+}
+
+.grid-2,
+.grid-3,
+.compare-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.grid-2,
+.compare-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.grid-3 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+.pipeline {
+  margin: 0.8rem 0 0;
+  padding: 0.7rem;
+  border-left: 3px solid var(--accent);
+  background: rgba(0, 95, 115, 0.08);
+}
+
+.audio-wrap {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.6rem;
+  background: #fff;
+}
+
+audio { width: 100%; }
+
+.controls {
+  margin: 0.75rem 0;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+
+.chip-active {
+  background: var(--accent-soft);
+  border-color: #85c7d3;
+}
+
+.transcript {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.transcript-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.word {
+  border-radius: 7px;
+  padding: 0.1rem 0.35rem;
+  transition: transform 130ms ease, box-shadow 130ms ease;
+}
+
+.word.low { background: color-mix(in srgb, var(--prom-low) 30%, white); }
+.word.mid { background: color-mix(in srgb, var(--prom-mid) 45%, white); }
+.word.high { background: color-mix(in srgb, var(--prom-high) 36%, white); }
+.word.active {
+  transform: translateY(-2px);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.18);
+}
+
+.legend {
+  margin: 0 0 0.65rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.dot {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 99px;
+  margin: 0 0.2rem 0 0.65rem;
+}
+.dot.low { background: var(--prom-low); }
+.dot.mid { background: var(--prom-mid); }
+.dot.high { background: var(--prom-high); }
+
+.timeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.timeline-chip {
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--prom-low);
+  padding: 0.28rem 0.5rem;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 0.86rem;
+}
+
+.timeline-chip.mid { border-left-color: var(--prom-mid); }
+.timeline-chip.high { border-left-color: var(--prom-high); }
+.timeline-chip.active { outline: 2px solid #222; }
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88rem;
+}
+
+.footer {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding-bottom: 2rem;
+}
+
+@media (max-width: 700px) {
+  .hero,
+  .panel,
+  .footer { padding: 1rem; }
+}

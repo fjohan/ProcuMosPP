@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Whisper + Prominence Demo</title>
+  <meta name="description" content="Whisper gives you words. ProcuMosPP adds prosodic prominence." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="hero">
+    <p class="eyebrow">ProcuMosPP</p>
+    <h1>From what was said to how it was said</h1>
+    <p class="lede">
+      Whisper transcribes <strong>content</strong>. ProcuMosPP predicts word-level
+      <strong>prominence</strong>, adding an expressive layer that plain text misses.
+    </p>
+    <div class="cta-row">
+      <a class="btn" href="#demo">Try the demo</a>
+      <a class="btn btn-ghost" href="README.md" aria-label="Project repository">View code</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel" id="why">
+      <h2>Why this complements Whisper</h2>
+      <div class="grid-2">
+        <article class="card">
+          <h3>Whisper</h3>
+          <p>Excellent at recovering <em>what words</em> were spoken.</p>
+          <p class="mono">Output: transcript + timestamps</p>
+        </article>
+        <article class="card">
+          <h3>ProcuMosPP</h3>
+          <p>Adds estimated <em>word prominence</em> from the audio signal.</p>
+          <p class="mono">Output: per-word prominence scores</p>
+        </article>
+      </div>
+      <p class="pipeline">Audio -> Whisper (text + timing) -> ProcuMosPP (prominence) -> enriched transcript</p>
+    </section>
+
+    <section class="panel" id="demo">
+      <h2>Interactive demo</h2>
+      <p class="sub">Listen to a Swedish clip and compare plain Whisper-style text vs enriched prominence view.</p>
+
+      <div class="audio-wrap">
+        <audio id="audio" controls preload="metadata">
+          <source src="example_data/seg_023.wav" type="audio/wav" />
+          Your browser does not support the audio element.
+        </audio>
+      </div>
+
+      <div class="controls">
+        <button id="viewPlain" class="chip chip-active" type="button">Whisper text only</button>
+        <button id="viewProm" class="chip" type="button">Whisper + prominence</button>
+      </div>
+
+      <div class="compare-grid">
+        <article class="card">
+          <h3>Whisper output</h3>
+          <p id="plainTranscript" class="transcript"></p>
+        </article>
+        <article class="card">
+          <h3>Enriched output</h3>
+          <p class="legend">
+            <span class="dot low"></span> low
+            <span class="dot mid"></span> mid
+            <span class="dot high"></span> high
+          </p>
+          <div id="prominentTranscript" class="transcript transcript-words" aria-live="polite"></div>
+        </article>
+      </div>
+
+      <article class="card timeline-card">
+        <h3>Word timeline (prominence-aware)</h3>
+        <div id="timeline" class="timeline"></div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>What this enables</h2>
+      <div class="grid-3">
+        <article class="card">
+          <h3>Speech analytics</h3>
+          <p>Find emphasized terms, not just frequent terms.</p>
+        </article>
+        <article class="card">
+          <h3>TTS and dubbing</h3>
+          <p>Use prominence as a control signal for more natural prosody.</p>
+        </article>
+        <article class="card">
+          <h3>Media annotation</h3>
+          <p>Track rhetorical focus in interviews, podcasts, and news.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Demo clip: <code>example_data/seg_023.wav</code> | Timestamps from <code>example_data/seg_023.csv</code></p>
+    <p>Prominence values shown on this page are illustrative demo scores.</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
