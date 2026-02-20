@@ -215,6 +215,12 @@ audio { width: 100%; }
   stroke-width: 1;
 }
 
+.axis-label {
+  fill: #5b5a57;
+  font-size: 12px;
+  font-family: "Source Sans 3", "Segoe UI", sans-serif;
+}
+
 .grid-line {
   stroke: #ece7dc;
   stroke-width: 1;

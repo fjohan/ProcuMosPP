@@ -155,6 +155,23 @@ function renderChart() {
   yAxis.setAttribute("class", "axis");
   chart.appendChild(yAxis);
 
+  const xLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  xLabel.setAttribute("x", String(m.l + innerW / 2));
+  xLabel.setAttribute("y", String(h - 6));
+  xLabel.setAttribute("text-anchor", "middle");
+  xLabel.setAttribute("class", "axis-label");
+  xLabel.textContent = "time (s)";
+  chart.appendChild(xLabel);
+
+  const yLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  yLabel.setAttribute("x", "14");
+  yLabel.setAttribute("y", String(m.t + innerH / 2));
+  yLabel.setAttribute("text-anchor", "middle");
+  yLabel.setAttribute("transform", `rotate(-90 14 ${m.t + innerH / 2})`);
+  yLabel.setAttribute("class", "axis-label");
+  yLabel.textContent = "prominence";
+  chart.appendChild(yLabel);
+
   const points = words.map((d) => {
     const cx = x((d.start + d.end) / 2);
     const cy = y(d.prom);
@@ -173,8 +190,9 @@ function renderChart() {
     c.setAttribute("r", "3.2");
     c.setAttribute("class", "pt");
     c.setAttribute("data-i", String(i));
-    c.appendChild(document.createTitle());
-    c.querySelector("title").textContent = `${d.text}: ${d.prom.toFixed(2)}`;
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = `${d.text}: ${d.prom.toFixed(2)}`;
+    c.appendChild(title);
     chart.appendChild(c);
     pointEls.push(c);
   });
