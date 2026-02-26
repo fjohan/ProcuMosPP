@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProcuMosPP Story Demo</title>
+  <meta name="description" content="Whisper + ProcuMosPP: transcript plus prosodic prominence." />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="showcase.css" />
+</head>
+<body>
+  <header class="hero story-hero">
+    <p class="eyebrow">Whisper + ProcuMosPP</p>
+    <h1>Text tells you what was said. Prominence tells you how it was said.</h1>
+    <p class="lede">
+      This page presents ProcuMosPP as a complementary layer to Whisper.
+      Whisper recovers words and timing; ProcuMosPP adds word-level prominence from the audio signal.
+    </p>
+    <div class="cta-row">
+      <a class="btn" href="#questions">Three framing questions</a>
+      <a class="btn btn-ghost" href="#demo">Interactive demo</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel" id="questions">
+      <h2>Three framing questions</h2>
+      <div class="grid-3">
+        <article class="card">
+          <h3>What kind of technology is it?</h3>
+          <p>
+            A speech ML inference pipeline for prosodic prominence prediction.
+            It combines acoustic features and transformer-based speech representations
+            to estimate emphasis per word.
+          </p>
+        </article>
+        <article class="card">
+          <h3>What can it be used for?</h3>
+          <p>
+            Enriching transcripts, speech analytics, prosody-aware annotation,
+            and downstream systems where emphasis matters (for example, expressive TTS workflows).
+          </p>
+        </article>
+        <article class="card">
+          <h3>What questions can it answer?</h3>
+          <p>
+            Which words were emphasized? Where are prominence peaks in time?
+            How does emphasis differ between readings of the same content?
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel" id="workflow">
+      <h2>How the modeling process works</h2>
+      <div class="grid-2">
+        <article class="card">
+          <video class="workflow-video" controls preload="metadata">
+            <source src="out_directed_tt.mp4" type="video/mp4" />
+            Your browser does not support the video tag.
+          </video>
+          <p class="sub">
+            Workflow animation: human labeling -> aggregation -> training -> prediction.
+          </p>
+        </article>
+        <article class="card">
+          <ol class="steps">
+            <li><strong>Human labeling:</strong> users assign labels to raw data.</li>
+            <li><strong>Aggregation:</strong> individual labels are combined into robust statistics.</li>
+            <li><strong>Training:</strong> a model learns from aggregated human labels.</li>
+            <li><strong>Prediction:</strong> model output is compared with human labels.</li>
+          </ol>
+          <p class="pipeline">
+            In deployment, this becomes: Audio -> Whisper (text + timestamps) -> ProcuMosPP (prominence) -> enriched transcript.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel" id="demo">
+      <h2>Interactive Whisper + Prominence demo</h2>
+      <p class="sub">Switch between two real examples and inspect model predictions from <code>example_data/*_pred.csv</code>.</p>
+
+      <div class="controls">
+        <label for="exampleSelect"><strong>Example:</strong></label>
+        <select id="exampleSelect" class="select">
+          <option value="seg_023">seg_023</option>
+          <option value="seg_006">seg_006</option>
+        </select>
+      </div>
+
+      <div class="audio-wrap">
+        <audio id="audio" controls preload="metadata">
+          <source src="example_data/seg_023.wav" type="audio/wav" />
+          Your browser does not support the audio element.
+        </audio>
+      </div>
+
+      <div class="controls">
+        <button id="viewPlain" class="chip chip-active" type="button">Whisper text only</button>
+        <button id="viewProm" class="chip" type="button">Whisper + prominence</button>
+      </div>
+
+      <div class="compare-grid">
+        <article class="card">
+          <h3>Whisper output</h3>
+          <p id="plainTranscript" class="transcript"></p>
+        </article>
+        <article class="card">
+          <h3>Enriched output</h3>
+          <p class="legend">
+            <span class="dot low"></span> low
+            <span class="dot mid"></span> mid
+            <span class="dot high"></span> high
+          </p>
+          <div id="prominentTranscript" class="transcript transcript-words" aria-live="polite"></div>
+        </article>
+      </div>
+
+      <article class="card timeline-card">
+        <h3>Word timeline (prominence-aware)</h3>
+        <div id="timeline" class="timeline"></div>
+      </article>
+
+      <article class="card">
+        <h3>Model prominence curve</h3>
+        <p class="sub">Predicted prominence by word midpoint.</p>
+        <svg id="promChart" class="chart" viewBox="0 0 900 260" preserveAspectRatio="none" role="img" aria-label="Prominence graph"></svg>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Data sources: <code>example_data/seg_006*.{wav,csv}</code>, <code>example_data/seg_023*.{wav,csv}</code>, <code>out_directed_tt.mp4</code></p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+.story-hero {
+  padding-top: 2.5rem;
+}
+
+.workflow-video {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.steps li {
+  line-height: 1.4;
+}
