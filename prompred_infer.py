@@ -48,8 +48,11 @@ class ProminencePredictor(nn.Module):
         use_attn=True,
         use_max=True,
         output_scale=3.0,
+        output_dim=1,
+        target_mode="regression",
     ):
         super().__init__()
+        self.target_mode = target_mode
         self.pooling = ConfigurablePooling(frame_dim, use_attn=use_attn, use_max=use_max)
         pooling_multiplier = 1 + (1 if use_max else 0)
         lstm_input_dim = (frame_dim * pooling_multiplier) + scalar_dim
@@ -62,7 +65,7 @@ class ProminencePredictor(nn.Module):
             bidirectional=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
-        self.fc = nn.Linear(hidden_dim * 2, 1)
+        self.fc = nn.Linear(hidden_dim * 2, output_dim)
         self.activation = nn.Sigmoid()
         self.output_scale = float(output_scale)
 
@@ -87,8 +90,65 @@ class ProminencePredictor(nn.Module):
         packed_out, _ = self.lstm(packed)
         out, _ = torch.nn.utils.rnn.pad_packed_sequence(packed_out, batch_first=True)
 
-        y = self.activation(self.fc(out)) * self.output_scale
-        return y.squeeze(-1)  # [B, S]
+        logits = self.fc(out)
+        if self.target_mode == "regression":
+            y = self.activation(logits) * self.output_scale
+            return y.squeeze(-1)  # [B, S]
+        return logits  # [B, S, C]
+
+def labels_to_classes(labels, class_config):
+    labels = np.asarray(labels, dtype=np.float32)
+    return np.digitize(labels, class_config["thresholds"]).astype(np.int64)
+
+def probs_to_classes(probs, target_mode, class_config):
+    probs = np.asarray(probs, dtype=np.float32)
+    if class_config.get("decision_method") != "proportion_threshold":
+        return np.argmax(probs, axis=-1).astype(np.int64)
+    if target_mode == "binary":
+        threshold = float(class_config["prom_threshold"])
+        return (probs[:, 1] >= threshold).astype(np.int64)
+    if target_mode == "ternary":
+        prom_prob = probs[:, 1] + probs[:, 2]
+        strong_prob = probs[:, 2]
+        prom_threshold = float(class_config["prom_threshold"])
+        strong_threshold = float(class_config["strong_threshold"])
+        out = np.zeros((len(probs),), dtype=np.int64)
+        out[prom_prob >= prom_threshold] = 1
+        out[strong_prob >= strong_threshold] = 2
+        return out
+    raise ValueError(f"Unsupported class target mode: {target_mode}")
+
+def ordinal_probs_to_classes(probs, target_mode, class_config=None):
+    probs = np.asarray(probs, dtype=np.float32)
+    if target_mode == "binary":
+        threshold = 0.5
+        if class_config and class_config.get("decision_method") == "proportion_threshold":
+            threshold = float(class_config.get("prom_threshold", threshold))
+        return (probs[:, 0] >= threshold).astype(np.int64)
+    if target_mode == "ternary":
+        prom_threshold = 0.5
+        strong_threshold = 0.5
+        if class_config and class_config.get("decision_method") == "proportion_threshold":
+            prom_threshold = float(class_config.get("prom_threshold", prom_threshold))
+            strong_threshold = float(class_config.get("strong_threshold", strong_threshold))
+        out = np.zeros((len(probs),), dtype=np.int64)
+        out[probs[:, 0] >= prom_threshold] = 1
+        out[probs[:, 1] >= strong_threshold] = 2
+        return out
+    raise ValueError(f"Unsupported class target mode: {target_mode}")
+
+def ordinal_probs_to_class_probs(probs, target_mode):
+    probs = np.asarray(probs, dtype=np.float32)
+    if target_mode == "binary":
+        return np.concatenate([1.0 - probs[:, 0:1], probs[:, 0:1]], axis=1).clip(0.0, 1.0)
+    if target_mode == "ternary":
+        p_gt0 = probs[:, 0]
+        p_gt1 = np.minimum(probs[:, 1], p_gt0)
+        p0 = 1.0 - p_gt0
+        p1 = p_gt0 - p_gt1
+        p2 = p_gt1
+        return np.stack([p0, p1, p2], axis=1).clip(0.0, 1.0)
+    raise ValueError(f"Unsupported class target mode: {target_mode}")
 
 # ------------------------------------------------------------
 # Pitch shape feature
@@ -557,6 +617,9 @@ def run_inference_for_file(
     max_frames_per_word,
     scalar_dim,
     device,
+    target_mode="regression",
+    class_config=None,
+    class_head="softmax",
     out_csv_override=None,
     inplace=False,
     batch_mode=False,
@@ -604,7 +667,20 @@ def run_inference_for_file(
 
     # ----- Predict -----
     with torch.no_grad():
-        preds = model(frames_t, scalars_t, lengths_t).squeeze(0).cpu().numpy()
+        outputs = model(frames_t, scalars_t, lengths_t)
+        if target_mode == "regression":
+            preds = outputs.squeeze(0).cpu().numpy()
+            probs = None
+            pred_class = None
+        elif class_head == "ordinal":
+            ordinal_probs = torch.sigmoid(outputs.squeeze(0)).cpu().numpy()
+            pred_class = ordinal_probs_to_classes(ordinal_probs, target_mode, class_config)
+            probs = ordinal_probs_to_class_probs(ordinal_probs, target_mode)
+            preds = pred_class.astype(np.float32)
+        else:
+            probs = torch.softmax(outputs.squeeze(0), dim=-1).cpu().numpy()
+            pred_class = probs_to_classes(probs, target_mode, class_config)
+            preds = pred_class.astype(np.float32)
 
     # ----- Optional non-speech mitigation (energy mask / VAD / smoothing) -----
     final_mask = np.ones((T_total,), dtype=bool)
@@ -653,32 +729,66 @@ def run_inference_for_file(
             speech_ratio = float(np.mean(seg_mask)) if len(seg_mask) else 0.0
             if speech_ratio < args.silence_zero_thresh:
                 preds[i] = 0.0
+                if pred_class is not None:
+                    pred_class[i] = 0
+                    probs[i, :] = 0.0
+                    probs[i, 0] = 1.0
             else:
-                preds[i] = preds[i] * speech_ratio
+                if target_mode == "regression":
+                    preds[i] = preds[i] * speech_ratio
 
     # ----- Output CSV -----
     if inplace:
         if mode != "csv":
             raise RuntimeError("--inplace requires CSV-based inference.")
         out_csv = csv_path
-        out_df = pd.DataFrame({
-            "start": starts,
-            "end": ends,
-            "word": labels,
-            "predicted_rating": preds,
-        })
+        if target_mode == "regression":
+            out_df = pd.DataFrame({
+                "start": starts,
+                "end": ends,
+                "word": labels,
+                "predicted_rating": preds,
+            })
+        else:
+            class_names = class_config.get("class_names", [str(i) for i in range(probs.shape[1])])
+            out_df = pd.DataFrame({
+                "start": starts,
+                "end": ends,
+                "word": labels,
+                "predicted_class": pred_class,
+                "predicted_label": [class_names[int(c)] for c in pred_class],
+                "predicted_prob": np.max(probs, axis=1),
+            })
     else:
         out_csv = out_csv_override
         if out_csv is None:
             out_csv = f"{os.path.splitext(wav_path)[0]}_pred.csv"
-        out_df = pd.DataFrame({
-            "start": starts,
-            "end": ends,
-            "label": labels,
-            "pred": preds,
-        })
+        if target_mode == "regression":
+            out_df = pd.DataFrame({
+                "start": starts,
+                "end": ends,
+                "label": labels,
+                "pred": preds,
+            })
+        else:
+            class_names = class_config.get("class_names", [str(i) for i in range(probs.shape[1])])
+            out_df = pd.DataFrame({
+                "start": starts,
+                "end": ends,
+                "label": labels,
+                "pred_class": pred_class,
+                "pred_label": [class_names[int(c)] for c in pred_class],
+                "pred_prob": np.max(probs, axis=1),
+            })
+            for class_idx, class_name in enumerate(class_names):
+                out_df[f"prob_{class_idx}_{class_name}"] = probs[:, class_idx]
         if mode == "csv":
             out_df["obs"] = obs
+            if target_mode != "regression" and class_config.get("thresholds") is not None:
+                valid_obs = np.isfinite(obs)
+                obs_class = np.full(obs.shape, np.nan, dtype=np.float32)
+                obs_class[valid_obs] = labels_to_classes(obs[valid_obs], class_config)
+                out_df["obs_class"] = obs_class
 
     out_df.to_csv(out_csv, index=False, header=not args.no_header)
     print(f"[Wrote] {out_csv}")
@@ -785,12 +895,28 @@ def main():
     USE_MAX_POOLING = bool(cfg.get("USE_MAX_POOLING", True))
 
     MAX_FRAMES_PER_WORD = int(cfg.get("MAX_FRAMES_PER_WORD", 50))
-    FRAME_DIM = int(cfg.get("FRAME_DIM", AutoConfig.from_pretrained(W2V_MODEL_NAME).hidden_size + (1 if USE_RAW_PITCH else 0)))
+    if "FRAME_DIM" in cfg:
+        FRAME_DIM = int(cfg["FRAME_DIM"])
+    else:
+        FRAME_DIM = int(AutoConfig.from_pretrained(W2V_MODEL_NAME).hidden_size + (1 if USE_RAW_PITCH else 0))
     SCALAR_DIM = int(cfg.get("SCALAR_DIM", 8))
     HIDDEN_DIM = int(cfg.get("HIDDEN_DIM", 64))
     NUM_LAYERS = int(cfg.get("NUM_LAYERS", 1))
     DROPOUT = float(cfg.get("DROPOUT", 0.3))
     OUTPUT_SCALE = float(cfg.get("OUTPUT_SCALE", cfg.get("output_scale", 3.0)))  # default matches your current training
+    TARGET_MODE = cfg.get("TARGET_MODE", "regression")
+    CLASS_CONFIG = cfg.get("CLASS_CONFIG", None)
+    CLASS_HEAD = cfg.get("CLASS_HEAD", "softmax")
+
+    if TARGET_MODE != "regression" and not CLASS_CONFIG:
+        raise SystemExit("Classifier checkpoint is missing CLASS_CONFIG.")
+    if TARGET_MODE == "regression":
+        default_output_dim = 1
+    elif CLASS_HEAD == "ordinal":
+        default_output_dim = int(CLASS_CONFIG["num_classes"]) - 1
+    else:
+        default_output_dim = int(CLASS_CONFIG["num_classes"])
+    OUTPUT_DIM = int(cfg.get("OUTPUT_DIM", default_output_dim))
 
     scalar_scaler = ckpt["scalar_scaler"]
     frame_scaler = ckpt.get("frame_scaler", None)
@@ -811,6 +937,8 @@ def main():
         use_attn=USE_ATTENTION,
         use_max=USE_MAX_POOLING,
         output_scale=OUTPUT_SCALE,
+        output_dim=OUTPUT_DIM,
+        target_mode=TARGET_MODE,
     ).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
@@ -848,6 +976,9 @@ def main():
                     max_frames_per_word=MAX_FRAMES_PER_WORD,
                     scalar_dim=SCALAR_DIM,
                     device=device,
+                    target_mode=TARGET_MODE,
+                    class_config=CLASS_CONFIG,
+                    class_head=CLASS_HEAD,
                     out_csv_override=None,
                     inplace=args.inplace,
                     batch_mode=True,
@@ -874,6 +1005,9 @@ def main():
             max_frames_per_word=MAX_FRAMES_PER_WORD,
             scalar_dim=SCALAR_DIM,
             device=device,
+            target_mode=TARGET_MODE,
+            class_config=CLASS_CONFIG,
+            class_head=CLASS_HEAD,
             out_csv_override=args.out_csv,
             inplace=False,
             batch_mode=False,

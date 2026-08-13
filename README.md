@@ -192,6 +192,143 @@ Run LOSO with a single seed:
 python prompred_train.py --mode loso --seed 42
 ```
 
+Run LOSO as a classifier instead of continuous regression:
+
+```bash
+# Binary: class 0 = no prominence, class 1 = prominent
+python prompred_train.py --mode loso --target binary
+
+# Ternary: class 0 = no prominence, class 1 = maybe prominent, class 2 = prominent
+python prompred_train.py --mode loso --target ternary
+```
+
+By default, class boundaries are learned from the training labels with 1D k-means:
+
+```bash
+python prompred_train.py --mode loso --target ternary --class_boundary_method kmeans
+```
+
+A Gaussian mixture model can also be used to learn probabilistic 1D rating clusters:
+
+```bash
+python prompred_train.py --mode loso --target ternary --class_boundary_method gmm
+```
+
+In LOSO mode, those boundaries are fit separately inside each fold using only the training speakers, then applied to the held-out speaker. This avoids leaking held-out speaker label distributions into the class definition. For fixed conventional boundaries, use rounding-style thresholds instead:
+
+```bash
+python prompred_train.py --mode loso --target ternary --class_boundary_method round
+```
+
+`round` uses threshold `0.5` for binary classification and thresholds `0.5,1.5` for ternary classification.
+
+Mean-rating thresholds can also be optimized inside each LOSO training fold:
+
+```bash
+python prompred_train.py --mode loso --target ternary --class_boundary_method opt_macro_f1
+python prompred_train.py --mode loso --target ternary --class_boundary_method opt_balanced_acc
+```
+
+These optimized thresholds are fit from the training speakers only in each fold.
+
+If per-rater labels are available, classification can use those instead of deriving classes from the mean rating. The expected file format is:
+
+```text
+========== Participant: 1 Date: ... ==========
+file_id; sentence text; 0 0 1 0 2 ...
+```
+
+`file_id` must match the basename of a `.csv`/`.wav` pair under `data/spkN/`. The script aligns the rater sentence tokens to the timed CSV words, so it can handle untimed words that appear in the rater sentence but not in the CSV.
+
+Use majority-vote hard labels:
+
+```bash
+python prompred_train.py \
+  --mode loso \
+  --target ternary \
+  --class_label_source rater_majority \
+  --rater_file per-rater2.txt
+```
+
+Use weighted-majority hard labels where rating `2` counts double:
+
+```bash
+python prompred_train.py \
+  --mode loso \
+  --target ternary \
+  --class_label_source rater_weighted_majority \
+  --rater_file per-rater2.txt
+```
+
+Use rater-distribution soft labels:
+
+```bash
+python prompred_train.py \
+  --mode loso \
+  --target ternary \
+  --class_label_source rater_soft \
+  --rater_file per-rater2.txt
+```
+
+For binary per-rater training, ratings `1` and `2` are grouped as the prominent class. For soft-label training, the target is the empirical rater distribution per word, for example `[P(0), P(1), P(2)]` in ternary mode.
+
+For `rater_soft`, hard class diagnostics and inference classes are derived from predicted/observed rater proportions instead of plain argmax. Defaults:
+
+- Binary: class `1` if `P(rating > 0) >= 0.25`
+- Ternary: class `2` if `P(rating = 2) >= 0.20`, else class `1` if `P(rating > 0) >= 0.25`, else class `0`
+
+These can be changed:
+
+```bash
+python prompred_train.py \
+  --mode loso \
+  --target ternary \
+  --class_label_source rater_soft \
+  --rater_file per-rater2.txt \
+  --soft_ternary_prom_threshold 0.30 \
+  --soft_ternary_strong_threshold 0.15
+```
+
+The `rater_soft` proportion thresholds can also be optimized from the training speakers in each LOSO fold:
+
+```bash
+python prompred_train.py \
+  --mode loso \
+  --target ternary \
+  --class_label_source rater_soft \
+  --rater_file per-rater2.txt \
+  --soft_threshold_method opt_macro_f1
+```
+
+Use `--soft_threshold_method opt_balanced_acc` to optimize balanced accuracy instead. The optimization target is agreement with the fold-local rater-majority labels, while the model can still train on soft rater distributions.
+
+Categorical training also supports fold-local balanced loss weights and an ordinal head:
+
+```bash
+python prompred_train.py \
+  --mode loso \
+  --target ternary \
+  --class_label_source rater_soft \
+  --rater_file per-rater2.txt \
+  --class_loss_weighting balanced
+```
+
+`balanced` computes class weights inside each LOSO training fold only, so held-out speaker labels are not used for weighting. With `rater_soft`, weights are computed from summed class probabilities rather than majority labels.
+
+The ordinal head replaces a flat 3-way softmax with cumulative binary decisions:
+
+```bash
+python prompred_train.py \
+  --mode loso \
+  --target ternary \
+  --class_label_source rater_soft \
+  --rater_file per-rater2.txt \
+  --class_head ordinal \
+  --class_loss_weighting balanced
+```
+
+For ternary classification, the ordinal head predicts `P(rating > 0)` and `P(rating > 1)`. For binary classification, it predicts `P(rating > 0)`.
+
 Train final model on all speakers and save checkpoint(s) to `models/`:
 
 ```bash
@@ -203,6 +340,16 @@ Single-seed full training:
 ```bash
 python prompred_train.py --mode all --seed 142857
 ```
+
+Train deployable classifier checkpoints:
+
+```bash
+python prompred_train.py --mode all --target binary --seed 142857
+python prompred_train.py --mode all --target ternary --seed 142857
+```
+
+Classifier checkpoints are saved with the target and boundary method in the filename, for example `models/prom_model_full_binary_kmeans_seed142857.pt`. The learned class thresholds are stored in the checkpoint and reused by `prompred_infer.py`.
+For per-rater classifier checkpoints, the label source is used in the filename, for example `models/prom_model_full_ternary_rater_soft_seed142857.pt`.
 
 Outputs:
 
@@ -290,6 +437,14 @@ Inference outputs:
 - if `--praat` is used:
   - `<prefix>_pred.TextGrid`
   - `<prefix>_prom.Sound`
+
+When the checkpoint is a classifier checkpoint, inference writes class outputs instead of a continuous `pred` value:
+
+- `pred_class`: numeric class id
+- `pred_label`: readable class label
+- `pred_prob`: probability of the predicted class
+- `prob_<class>` columns: per-class probabilities
+- `obs_class`: observed class, when the input CSV contains ratings
 
 ### 6.5 Caveat: Fixed-Interval Inference and Silence
 
