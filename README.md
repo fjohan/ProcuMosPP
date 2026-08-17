@@ -1,14 +1,3 @@
----
-title: ProcuMosPP Prominence Prediction
-emoji: 🎙️
-colorFrom: blue
-colorTo: pink
-sdk: gradio
-sdk_version: 6.17.3
-app_file: app.py
-pinned: false
----
-
 # Prosodic Cues and Modeling Strategies in Swedish Prominence Prediction
 
 ## Contents
