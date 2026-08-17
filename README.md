@@ -64,47 +64,6 @@ python prompred_infer.py \
 
 See "6.5 Caveat: Fixed-Interval Inference and Silence" before using this mode on long recordings.
 
-## Hugging Face Space App
-
-This repo includes a CPU-first Gradio app entrypoint for Hugging Face Spaces:
-
-```bash
-python app.py
-```
-
-The app supports:
-
-- uploading a sound file
-- optionally uploading a CSV or Praat TextGrid with word timings
-- inference with word segments or fixed sliding windows
-- minimal RMS-based silence suppression for sliding-window mode
-- output as a prediction table, enriched CSV download, prominence curve, and word timeline
-
-The app runs prominence prediction only. It does not run Whisper or produce transcripts.
-
-For TextGrid uploads, the app uses an `IntervalTier` named `word` or `words` when present. If no such tier exists, it uses the first non-empty `IntervalTier`.
-
-By default, the app loads:
-
-```text
-models/prom_model_full_seed142857.pt
-```
-
-For a Space where the ProcuMosPP checkpoint is stored in a separate Hugging Face model repo, set:
-
-```bash
-PROCUMOSPP_MODEL_REPO=your-name/your-procumospp-model-repo
-PROCUMOSPP_MODEL_FILENAME=prom_model_full_seed142857.pt
-```
-
-or set `PROCUMOSPP_CHECKPOINT` to a local checkpoint path. The Wav2Vec2 backbone is loaded from `KBLab/wav2vec2-large-voxrex-swedish`.
-
-CPU Spaces can be slow on first run because the Wav2Vec2 backbone is large. The app limits uploads to 60 seconds by default; change this with:
-
-```bash
-PROCUMOSPP_MAX_AUDIO_SECONDS=120
-```
-
 ## 1. Introduction
 This repo is the result of a study that investigates word-level prominence prediction in Swedish news speech. The goal was to predict continuous prominence ratings (scale 0-2) derived from mass crowdsourcing (20+ raters per file). We compared two pre-trained Wav2Vec 2.0 backbones, one generic and one language-specific, across three levels of architectural complexity to determine the optimal configuration for small-data prosody modeling.
 
