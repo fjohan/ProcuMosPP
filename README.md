@@ -1,3 +1,14 @@
+---
+title: ProcuMosPP Prominence Prediction
+emoji: 🎙️
+colorFrom: blue
+colorTo: pink
+sdk: gradio
+sdk_version: 6.17.3
+app_file: app.py
+pinned: false
+---
+
 # Prosodic Cues and Modeling Strategies in Swedish Prominence Prediction
 
 ## Contents
@@ -64,6 +75,47 @@ python prompred_infer.py \
 
 See "6.5 Caveat: Fixed-Interval Inference and Silence" before using this mode on long recordings.
 
+## Hugging Face Space App
+
+This repo includes a CPU-first Gradio app entrypoint for Hugging Face Spaces:
+
+```bash
+python app.py
+```
+
+The app supports:
+
+- uploading a sound file
+- optionally uploading a CSV or Praat TextGrid with word timings
+- inference with word segments or fixed sliding windows
+- minimal RMS-based silence suppression for sliding-window mode
+- output as a prediction table, enriched CSV download, prominence curve, and word timeline
+
+The app runs prominence prediction only. It does not run Whisper or produce transcripts.
+
+For TextGrid uploads, the app uses an `IntervalTier` named `word` or `words` when present. If no such tier exists, it uses the first non-empty `IntervalTier`.
+
+By default, the app loads:
+
+```text
+models/prom_model_full_seed142857.pt
+```
+
+For a Space where the ProcuMosPP checkpoint is stored in a separate Hugging Face model repo, set:
+
+```bash
+PROCUMOSPP_MODEL_REPO=your-name/your-procumospp-model-repo
+PROCUMOSPP_MODEL_FILENAME=prom_model_full_seed142857.pt
+```
+
+or set `PROCUMOSPP_CHECKPOINT` to a local checkpoint path. The Wav2Vec2 backbone is loaded from `KBLab/wav2vec2-large-voxrex-swedish`.
+
+CPU Spaces can be slow on first run because the Wav2Vec2 backbone is large. The app limits uploads to 60 seconds by default; change this with:
+
+```bash
+PROCUMOSPP_MAX_AUDIO_SECONDS=120
+```
+
 ## 1. Introduction
 This repo is the result of a study that investigates word-level prominence prediction in Swedish news speech. The goal was to predict continuous prominence ratings (scale 0-2) derived from mass crowdsourcing (20+ raters per file). We compared two pre-trained Wav2Vec 2.0 backbones, one generic and one language-specific, across three levels of architectural complexity to determine the optimal configuration for small-data prosody modeling.
 
@@ -78,7 +130,7 @@ We compared two pre-trained feature extractors:
 2.  **VoxRex-Large:** `KBLab/wav2vec2-large-voxrex-swedish` (Swedish-specific, 1024-dim). Trained specifically on Swedish corpora (SR, SVT, audiobooks).
 
 ### 2.3 Experimental Configurations
-We evaluated three incremental configurations:
+We evaluated three incremental SSL-backed configurations, plus a PiSh-only scalar ablation:
 
 *   **Config 1: Bare (Baseline)**
     *   **Pooling:** Simple Mean Pooling over the word's duration.
@@ -93,6 +145,10 @@ We evaluated three incremental configurations:
     *   **Explicit Prosody:** Adding 8 scalar features per word:
         *   *Pitch Shape:* 2nd-degree polynomial coefficients (Curvature, Slope, Height) + Residual Error to capture rises/falls/peaks.
         *   *Stats:* Log Duration, RMS Mean, RMS Max, Spectral Centroid.
+*   **Scalar Ablation: PiSh-only (`--no_ssl`)**
+    *   **Input:** The same 8 explicit PiSh scalar features, without Wav2Vec/VoxRex frame embeddings.
+    *   **Architecture:** Scalar sequence model (`PiSh scalars -> BiLSTM -> output head`), bypassing SSL frame extraction, attention pooling, and max pooling.
+    *   **Purpose:** Tests how much prominence can be predicted from explicit prosodic cues alone.
 
 ## 3. Results
 Results are reported as the mean Pearson Correlation ($r$) and Mean Squared Error (MSE) across 5 random seeds (30–35 epochs).
@@ -105,6 +161,7 @@ Results are reported as the mean Pearson Correlation ($r$) and Mean Squared Erro
 | **W2V2 (Generic)** | **Bare** | 0.6877 | 0.0438 | No language-specific knowledge. |
 | | **AWM** | 0.7046 | 0.0440 | Moderate improvement. |
 | | **PiSh** | 0.7238 | 0.0416 | **Significant gain**. Explicit features compensate for lack of language knowledge. |
+| **No SSL backbone** | **PiSh-only (`--no_ssl`)** | 0.6622 | 0.0525 | Explicit prosodic features alone are informative, but substantially below SSL-backed models. |
 
 ## 4. Discussion
 
@@ -185,6 +242,14 @@ Run LOSO evaluation (default mode):
 ```bash
 python prompred_train.py --mode loso
 ```
+
+Run a PiSh-only scalar baseline without Wav2Vec/VoxRex embeddings:
+
+```bash
+python prompred_train.py --mode loso --no_ssl
+```
+
+This keeps the explicit prosody scalar features and sequence model, but bypasses SSL frame extraction, attention pooling, and max pooling.
 
 Run LOSO with a single seed:
 

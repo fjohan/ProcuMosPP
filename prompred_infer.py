@@ -1,6 +1,7 @@
 import os
 import argparse
 import math
+os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join("/tmp", "numba_cache"))
 import numpy as np
 import pandas as pd
 import librosa
@@ -50,12 +51,18 @@ class ProminencePredictor(nn.Module):
         output_scale=3.0,
         output_dim=1,
         target_mode="regression",
+        use_ssl=True,
     ):
         super().__init__()
         self.target_mode = target_mode
-        self.pooling = ConfigurablePooling(frame_dim, use_attn=use_attn, use_max=use_max)
-        pooling_multiplier = 1 + (1 if use_max else 0)
-        lstm_input_dim = (frame_dim * pooling_multiplier) + scalar_dim
+        self.use_ssl = use_ssl
+        if self.use_ssl:
+            self.pooling = ConfigurablePooling(frame_dim, use_attn=use_attn, use_max=use_max)
+            pooling_multiplier = 1 + (1 if use_max else 0)
+            lstm_input_dim = (frame_dim * pooling_multiplier) + scalar_dim
+        else:
+            self.pooling = None
+            lstm_input_dim = scalar_dim
 
         self.lstm = nn.LSTM(
             lstm_input_dim,
@@ -75,11 +82,14 @@ class ProminencePredictor(nn.Module):
         scalars: [B, SeqLen, ScalarDim]
         lengths: [B] (number of tokens/windows)
         """
-        B, S, T, F = frames.shape
-        flat_frames = frames.view(-1, T, F)              # [B*S, T, F]
-        pooled = self.pooling(flat_frames)               # [B*S, pooled_dim]
-        word_emb = pooled.view(B, S, -1)                 # [B, S, pooled_dim]
-        x = torch.cat([word_emb, scalars], dim=2)        # [B, S, pooled_dim+scalar_dim]
+        if self.use_ssl:
+            B, S, T, F = frames.shape
+            flat_frames = frames.view(-1, T, F)              # [B*S, T, F]
+            pooled = self.pooling(flat_frames)               # [B*S, pooled_dim]
+            word_emb = pooled.view(B, S, -1)                 # [B, S, pooled_dim]
+            x = torch.cat([word_emb, scalars], dim=2)        # [B, S, pooled_dim+scalar_dim]
+        else:
+            x = scalars
 
         # Pack/pad (optional). For inference, simplest: just run as-is if you want.
         # But we keep consistent with training, using pack.
@@ -284,6 +294,7 @@ def extract_segment_features(
     segments,
     processor,
     w2v_model,
+    use_ssl,
     use_raw_pitch,
     use_pitch_shape,
     use_scalars,
@@ -304,13 +315,6 @@ def extract_segment_features(
     y, sr = librosa.load(wav_path, sr=16000)
     duration = float(librosa.get_duration(y=y, sr=sr))
 
-    # W2V frames
-    inputs = processor(y, sampling_rate=16000, return_tensors="pt").to(device)
-    with torch.no_grad():
-        outputs = w2v_model(**inputs)
-    w2v_frames = outputs.last_hidden_state.squeeze(0).cpu().numpy()  # [T, D]
-    T_total = w2v_frames.shape[0]
-
     # Assume ~50 fps for wav2vec2 (20ms). Keep consistent with your training.
     MODEL_FPS = 50.0
     FRAME_DUR = 1.0 / MODEL_FPS
@@ -323,13 +327,22 @@ def extract_segment_features(
     rms_raw = librosa.feature.rms(y=y, frame_length=1024, hop_length=HOP)[0]
     cent_raw = librosa.feature.spectral_centroid(y=y, sr=sr, n_fft=1024, hop_length=HOP)[0]
 
-    min_len = min(len(w2v_frames), len(f0_raw), len(rms_raw), len(cent_raw))
-    w2v_frames = w2v_frames[:min_len]
+    if use_ssl:
+        inputs = processor(y, sampling_rate=16000, return_tensors="pt").to(device)
+        with torch.no_grad():
+            outputs = w2v_model(**inputs)
+        w2v_frames = outputs.last_hidden_state.squeeze(0).cpu().numpy()  # [T, D]
+        min_len = min(len(w2v_frames), len(f0_raw), len(rms_raw), len(cent_raw))
+        w2v_frames = w2v_frames[:min_len]
+    else:
+        w2v_frames = None
+        min_len = min(len(f0_raw), len(rms_raw), len(cent_raw))
     f0_raw = f0_raw[:min_len]
     rms_raw = rms_raw[:min_len]
     cent_raw = cent_raw[:min_len]
 
-    frame_dim = w2v_frames.shape[1] + (1 if use_raw_pitch else 0)
+    T_total = min_len
+    frame_dim = (w2v_frames.shape[1] + (1 if use_raw_pitch else 0)) if use_ssl else 1
 
     frames_out = []
     scalars_out = []
@@ -355,8 +368,12 @@ def extract_segment_features(
             ei = si + 1
 
         # Frames slice
-        curr_w2v = w2v_frames[si:ei]
-        if use_raw_pitch:
+        if use_ssl:
+            curr_w2v = w2v_frames[si:ei]
+        else:
+            curr_w2v = np.zeros((ei - si, frame_dim), dtype=np.float32)
+
+        if use_raw_pitch and use_ssl:
             f0_seg = f0_raw[si:ei]
             f0_num = np.nan_to_num(f0_seg).reshape(-1, 1)
             curr_frames = np.concatenate([curr_w2v, f0_num], axis=1)
@@ -611,6 +628,7 @@ def run_inference_for_file(
     model,
     scalar_scaler,
     frame_scaler,
+    use_ssl,
     use_raw_pitch,
     use_pitch_shape,
     use_scalars,
@@ -639,6 +657,7 @@ def run_inference_for_file(
         segs,
         processor,
         w2v_model,
+        use_ssl,
         use_raw_pitch,
         use_pitch_shape,
         use_scalars,
@@ -654,7 +673,7 @@ def run_inference_for_file(
     scalars_norm = scalar_scaler.transform(scalars_arr).astype(np.float32)
 
     frames_norm = frames_arr.copy()
-    if use_raw_pitch and frame_scaler is not None:
+    if use_ssl and use_raw_pitch and frame_scaler is not None:
         n_items, n_frames, _ = frames_norm.shape
         frames_norm[:, :, -1] = frame_scaler.transform(
             frames_norm[:, :, -1].reshape(-1, 1)
@@ -888,6 +907,7 @@ def main():
     cfg = ckpt.get("config", {})
 
     W2V_MODEL_NAME = cfg.get("W2V_MODEL_NAME", "facebook/wav2vec2-base-960h")
+    USE_SSL = bool(cfg.get("USE_SSL", True))
     USE_RAW_PITCH = bool(cfg.get("USE_RAW_PITCH", False))
     USE_PITCH_SHAPE = bool(cfg.get("USE_PITCH_SHAPE", True))
     USE_SCALARS = bool(cfg.get("USE_SCALARS", True))
@@ -897,6 +917,8 @@ def main():
     MAX_FRAMES_PER_WORD = int(cfg.get("MAX_FRAMES_PER_WORD", 50))
     if "FRAME_DIM" in cfg:
         FRAME_DIM = int(cfg["FRAME_DIM"])
+    elif not USE_SSL:
+        FRAME_DIM = 1
     else:
         FRAME_DIM = int(AutoConfig.from_pretrained(W2V_MODEL_NAME).hidden_size + (1 if USE_RAW_PITCH else 0))
     SCALAR_DIM = int(cfg.get("SCALAR_DIM", 8))
@@ -922,10 +944,15 @@ def main():
     frame_scaler = ckpt.get("frame_scaler", None)
 
     # ----- Load wav2vec2 -----
-    print(f"[Info] Loading W2V: {W2V_MODEL_NAME}")
-    processor = Wav2Vec2Processor.from_pretrained(W2V_MODEL_NAME)
-    w2v_model = Wav2Vec2Model.from_pretrained(W2V_MODEL_NAME).to(device)
-    w2v_model.eval()
+    if USE_SSL:
+        print(f"[Info] Loading W2V: {W2V_MODEL_NAME}")
+        processor = Wav2Vec2Processor.from_pretrained(W2V_MODEL_NAME)
+        w2v_model = Wav2Vec2Model.from_pretrained(W2V_MODEL_NAME).to(device)
+        w2v_model.eval()
+    else:
+        print("[Info] No SSL backbone: using scalar PiSh features only.")
+        processor = None
+        w2v_model = None
 
     # ----- Build model and load weights -----
     model = ProminencePredictor(
@@ -939,6 +966,7 @@ def main():
         output_scale=OUTPUT_SCALE,
         output_dim=OUTPUT_DIM,
         target_mode=TARGET_MODE,
+        use_ssl=USE_SSL,
     ).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
@@ -970,6 +998,7 @@ def main():
                     model=model,
                     scalar_scaler=scalar_scaler,
                     frame_scaler=frame_scaler,
+                    use_ssl=USE_SSL,
                     use_raw_pitch=USE_RAW_PITCH,
                     use_pitch_shape=USE_PITCH_SHAPE,
                     use_scalars=USE_SCALARS,
@@ -999,6 +1028,7 @@ def main():
             model=model,
             scalar_scaler=scalar_scaler,
             frame_scaler=frame_scaler,
+            use_ssl=USE_SSL,
             use_raw_pitch=USE_RAW_PITCH,
             use_pitch_shape=USE_PITCH_SHAPE,
             use_scalars=USE_SCALARS,

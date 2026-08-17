@@ -4,6 +4,7 @@ import random
 import warnings
 import csv
 import re
+os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join("/tmp", "numba_cache"))
 import numpy as np
 import pandas as pd
 import librosa
@@ -37,6 +38,7 @@ W2V_MODEL_NAME = "KBLab/wav2vec2-large-voxrex-swedish"
 #W2V_MODEL_NAME = "facebook/wav2vec2-base-960h"
 
 # --- FEATURE FLAGS ---
+USE_SSL = True          # Use Wav2Vec/VoxRex frame embeddings
 USE_RAW_PITCH = False    # Frame-by-frame pitch (keep False if using Shape)
 USE_SCALARS = True       # Keep True
 USE_PITCH_SHAPE = True   # <--- NEW: Use Polynomial Shape instead of basic stats
@@ -71,9 +73,9 @@ SOFT_THRESHOLD_METHOD = "fixed"
 THRESHOLD_MIN_COUNT_PER_CLASS = 1
 
 print(f"Running on: {DEVICE}")
-print(f"Model: {W2V_MODEL_NAME}")
+print(f"Model: {W2V_MODEL_NAME if USE_SSL else 'PiSh-only (no SSL backbone)'}")
 print("-" * 30)
-print(f"FEATS: Shape={USE_PITCH_SHAPE}, RawPitch={USE_RAW_PITCH}")
+print(f"FEATS: SSL={USE_SSL}, Shape={USE_PITCH_SHAPE}, RawPitch={USE_RAW_PITCH}")
 print(f"ARCH:  Attn={USE_ATTENTION}, Max={USE_MAX_POOLING}, Weighted={USE_WEIGHTED_LOSS}")
 print("-" * 30)
 
@@ -94,6 +96,8 @@ w2v_model = None
 
 def load_w2v_model():
     global processor, w2v_model
+    if not USE_SSL:
+        return
     if w2v_model is None:
         print(f"Loading Wav2Vec2 Model...")
         processor = Wav2Vec2Processor.from_pretrained(W2V_MODEL_NAME)
@@ -101,9 +105,18 @@ def load_w2v_model():
         w2v_model.eval()
 
 from transformers import AutoConfig
-config = AutoConfig.from_pretrained(W2V_MODEL_NAME)
-W2V_DIM = config.hidden_size
-FRAME_DIM = W2V_DIM + 1 if USE_RAW_PITCH else W2V_DIM
+W2V_DIM = 0
+FRAME_DIM = 1
+
+def configure_feature_dims():
+    global W2V_DIM, FRAME_DIM
+    if USE_SSL:
+        config = AutoConfig.from_pretrained(W2V_MODEL_NAME)
+        W2V_DIM = config.hidden_size
+        FRAME_DIM = W2V_DIM + 1 if USE_RAW_PITCH else W2V_DIM
+    else:
+        W2V_DIM = 0
+        FRAME_DIM = 1
 
 # Dimension Logic
 # [LogDur, RMS_Mean, RMS_Max, Cent_Mean] = 4 Base Scalars
@@ -157,10 +170,13 @@ def extract_features(wav_path, csv_path):
     y, sr = librosa.load(wav_path, sr=16000)
     
     # W2V2
-    inputs = processor(y, sampling_rate=16000, return_tensors="pt").to(DEVICE)
-    with torch.no_grad():
-        outputs = w2v_model(**inputs)
-    w2v_frames = outputs.last_hidden_state.squeeze(0).cpu().numpy()
+    if USE_SSL:
+        inputs = processor(y, sampling_rate=16000, return_tensors="pt").to(DEVICE)
+        with torch.no_grad():
+            outputs = w2v_model(**inputs)
+        w2v_frames = outputs.last_hidden_state.squeeze(0).cpu().numpy()
+    else:
+        w2v_frames = None
     
     # Acoustic Extraction
     HOP = 320 
@@ -172,7 +188,10 @@ def extract_features(wav_path, csv_path):
     rms_raw = librosa.feature.rms(y=y, frame_length=1024, hop_length=HOP)[0]
     cent_raw = librosa.feature.spectral_centroid(y=y, sr=sr, n_fft=1024, hop_length=HOP)[0]
     
-    min_len = min(len(w2v_frames), len(f0_frames), len(rms_raw), len(cent_raw))
+    if USE_SSL:
+        min_len = min(len(w2v_frames), len(f0_frames), len(rms_raw), len(cent_raw))
+    else:
+        min_len = min(len(f0_frames), len(rms_raw), len(cent_raw))
     
     MODEL_FPS = 50 
     df = pd.read_csv(csv_path, header=None, names=['start', 'end', 'word', 'rating'])
@@ -192,8 +211,12 @@ def extract_features(wav_path, csv_path):
             end_idx = start_idx + 1
 
         # --- Frames ---
-        curr_w2v = w2v_frames[start_idx:end_idx][:min_len]
-        if USE_RAW_PITCH:
+        if USE_SSL:
+            curr_w2v = w2v_frames[start_idx:end_idx][:min_len]
+        else:
+            curr_w2v = np.zeros((end_idx - start_idx, FRAME_DIM), dtype=np.float32)
+
+        if USE_RAW_PITCH and USE_SSL:
             curr_frames = np.concatenate([curr_w2v, f0_frames[start_idx:end_idx]], axis=1)
         else:
             curr_frames = curr_w2v
@@ -246,7 +269,8 @@ def extract_features(wav_path, csv_path):
 # ==========================================
 def get_cache_filename():
     safe_model = W2V_MODEL_NAME.replace("/", "_").replace("-", "_")
-    return f"feats_{safe_model}_shape{USE_PITCH_SHAPE}_raw{USE_RAW_PITCH}_scalars{USE_SCALARS}.pt"
+    ssl_name = safe_model if USE_SSL else "no_ssl"
+    return f"feats_{ssl_name}_shape{USE_PITCH_SHAPE}_raw{USE_RAW_PITCH}_scalars{USE_SCALARS}.pt"
 
 def precompute_data(root_dir):
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -366,9 +390,14 @@ class ProminencePredictor(nn.Module):
     def __init__(self, frame_dim, scalar_dim, hidden_dim=64, output_dim=1, target_mode="regression"):
         super().__init__()
         self.target_mode = target_mode
-        self.pooling = ConfigurablePooling(frame_dim)
-        pooling_multiplier = 1 + (1 if USE_MAX_POOLING else 0)
-        lstm_input_dim = (frame_dim * pooling_multiplier) + scalar_dim
+        self.use_ssl = USE_SSL
+        if self.use_ssl:
+            self.pooling = ConfigurablePooling(frame_dim)
+            pooling_multiplier = 1 + (1 if USE_MAX_POOLING else 0)
+            lstm_input_dim = (frame_dim * pooling_multiplier) + scalar_dim
+        else:
+            self.pooling = None
+            lstm_input_dim = scalar_dim
         
         self.lstm = nn.LSTM(lstm_input_dim, hidden_dim, 
                             num_layers=NUM_LAYERS, 
@@ -379,13 +408,14 @@ class ProminencePredictor(nn.Module):
         self.activation = nn.Sigmoid() 
 
     def forward(self, frames, scalars, lengths):
-        batch_size, seq_len, num_frames, feat_dim = frames.shape
-        
-        flat_frames = frames.view(-1, num_frames, feat_dim)
-        pooled_feats = self.pooling(flat_frames) 
-        word_embeddings = pooled_feats.view(batch_size, seq_len, -1)
-        
-        lstm_input = torch.cat([word_embeddings, scalars], dim=2) 
+        if self.use_ssl:
+            batch_size, seq_len, num_frames, feat_dim = frames.shape
+            flat_frames = frames.view(-1, num_frames, feat_dim)
+            pooled_feats = self.pooling(flat_frames)
+            word_embeddings = pooled_feats.view(batch_size, seq_len, -1)
+            lstm_input = torch.cat([word_embeddings, scalars], dim=2)
+        else:
+            lstm_input = scalars
         packed_x = pack_padded_sequence(lstm_input, lengths.cpu(), batch_first=True, enforce_sorted=False)
         packed_out, _ = self.lstm(packed_x)
         out, _ = pad_packed_sequence(packed_out, batch_first=True)
@@ -1269,6 +1299,7 @@ def train_full_model(seed, data_map, save_dir="models"):
     # save deployable checkpoint (model + scalers + config)
     extra_cfg = {
         "W2V_MODEL_NAME": W2V_MODEL_NAME,
+        "USE_SSL": USE_SSL,
         "USE_RAW_PITCH": USE_RAW_PITCH,
         "USE_SCALARS": USE_SCALARS,
         "USE_PITCH_SHAPE": USE_PITCH_SHAPE,
@@ -1328,6 +1359,8 @@ if __name__ == '__main__':
                         help="loso = leave-one-speaker-out eval, all = train final model on all speakers")
     parser.add_argument("--seed", type=int, default=None,
                         help="Optional single seed (otherwise uses SEEDS_TO_TEST)")
+    parser.add_argument("--no_ssl", action="store_true",
+                        help="Train a PiSh-only scalar model without Wav2Vec/VoxRex frame embeddings")
     parser.add_argument("--target", choices=["regression", "binary", "ternary"], default="regression",
                         help="Prediction target: continuous regression, 0/1 prominence, or 0/1/2 prominence classes")
     parser.add_argument("--class_boundary_method", choices=["kmeans", "gmm", "round", "opt_macro_f1", "opt_balanced_acc"], default="kmeans",
@@ -1351,6 +1384,11 @@ if __name__ == '__main__':
     parser.add_argument("--threshold_min_count_per_class", type=int, default=1,
                         help="Minimum train-fold examples required in each derived class when optimizing thresholds")
     args = parser.parse_args()
+
+    USE_SSL = not args.no_ssl
+    if not USE_SSL:
+        USE_RAW_PITCH = False
+    configure_feature_dims()
 
     TARGET_MODE = args.target
     CLASS_BOUNDARY_METHOD = args.class_boundary_method
@@ -1376,6 +1414,13 @@ if __name__ == '__main__':
 
     if args.rater_file:
         RATER_COUNTS_BY_FILE = load_rater_counts(args.rater_file, DATA_ROOT)
+
+    print("\nEffective configuration")
+    print("-" * 30)
+    print(f"Model: {W2V_MODEL_NAME if USE_SSL else 'PiSh-only (no SSL backbone)'}")
+    print(f"FEATS: SSL={USE_SSL}, Shape={USE_PITCH_SHAPE}, RawPitch={USE_RAW_PITCH}")
+    print(f"ARCH:  Attn={USE_ATTENTION if USE_SSL else False}, Max={USE_MAX_POOLING if USE_SSL else False}, Weighted={USE_WEIGHTED_LOSS}")
+    print("-" * 30)
 
     data_map = precompute_data(DATA_ROOT)
 
